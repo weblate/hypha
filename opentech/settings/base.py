@@ -30,6 +30,8 @@ INSTALLED_APPS = [
     'opentech.public.standardpages',
     'opentech.public.utils',
 
+    'social_django',
+
     'wagtail.contrib.modeladmin',
     'wagtail.contrib.postgres_search',
     'wagtail.contrib.settings',
@@ -92,6 +94,8 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'wagtail.contrib.settings.context_processors.settings',
                 'opentech.public.utils.context_processors.global_vars',
+                'social_django.context_processors.backends',
+                'social_django.context_processors.login_redirect',
             ],
         },
     },
@@ -184,6 +188,12 @@ AUTH_USER_MODEL = 'users.User'
 LOGIN_URL = 'users:login'
 LOGIN_REDIRECT_URL = '/'
 
+AUTHENTICATION_BACKENDS = (
+    'social_core.backends.google.GoogleOAuth2',
+
+    'django.contrib.auth.backends.ModelBackend',
+)
+
 # Logging
 
 LOGGING = {
@@ -262,3 +272,13 @@ ESI_ENABLED = False
 # Custom settings
 
 ENABLE_STYLEGUIDE = False
+
+# Social Auth
+SOCIAL_AUTH_URL_NAMESPACE = 'social'
+SOCIAL_AUTH_GOOGLEOAUTH2_WHITELISTED_DOMAINS = ['opentechfund.org']
+
+# Set the Google OAuth2 credentials in ENV variables or local.py
+# To create a new set of credentials, go to https://console.developers.google.com/apis/credentials
+# Make sure the Google+ API is enabled for your API project
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = ''
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = ''
