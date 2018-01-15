@@ -22,12 +22,9 @@ class Category(ClusterableModel):
     name = models.CharField(max_length=255)
     help_text = models.CharField(max_length=255, blank=True)
 
-    @property
-    def field_label(self):
-        return self.name
-
     panels = [
         FieldPanel('name'),
+        FieldPanel('help_text'),
         InlinePanel('options', label='Options'),
     ]
 
