@@ -1,6 +1,68 @@
 {% extends 'django_tables2/table.html' %}
+{% load django_tables2 table_tags review_tags %}
 
-{# example of how to extend the table template #}
 {% block table.tbody.row %}
     {{ block.super }}
+
+    {% with submission=row.record %}
+        <tr class="all-submissions__child" data-parent-id="{{ row.record.id }}">
+            <td colspan="{{ table.columns|length }}">
+                <table class="submission-meta">
+                    <tr class="submission-meta__row">
+                        <th><h6 class="heading heading--normal heading--no-margin">Applicant</h6></th>
+                        <th><h6 class="heading heading--normal heading--no-margin">Last updated</h6></th>
+                        <th><h6 class="heading heading--normal heading--no-margin">Reviewers / Outcomes</h6></th>
+                    </tr>
+                    <tr class="submission-meta__row submission-meta__row--black">
+                        <td><strong>{{ submission.full_name }}</strong></td>
+                        <td>
+                            {% with row.record.activities.last as last_update %}
+                                {% if last_update %}
+                                    <strong>by {{ last_update.user }}</strong><br/>
+                                    {{ last_update.timestamp|date:"Y-m-d \a\t H:i" }}
+                                {% else %}
+                                    &mdash;
+                                {% endif %}
+                            {% endwith %}
+                        </td>
+                        <td>
+                            <ul class="list list--no-margin">
+                                {% for review in row.record.reviews.all %}
+                                    <li class="list__item list__item--reviewer">
+                                        <span class="list__item--reviewer-name">{{ review.author }}</span>
+                                        <span class="list__item list__item--reviewer-outcome">{{ review.get_recommendation_display }}</span>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    {% endwith %}
+
+    {% if row.record.previous %}
+        {# we have a linked application, re-render the header row #}
+        <tr class="all-submissions__child" data-parent-id="{{ row.record.id }}">
+            <td colspan="{{ table.columns|length }}">
+                <table class="submission-meta">
+                    <tr class="submission-meta__row">
+                    {% for column in row.table.columns %}
+                        {% if forloop.first %}
+                            <th>Linked {{ row.record.previous.stage }}</th>
+                        {% else %}
+                            <th class="th th--{{ column.header|lower }}">{{ column.header }}</th>
+                        {% endif %}
+                    {% endfor %}
+                    </tr>
+
+                    {# mutate the row to render the data for the child row #}
+                    {% with row=row|row_from_record:row.record.previous %}
+                        {{ block.super }}
+                    {% endwith %}
+                </table>
+            </td>
+        </tr>
+    {% endif %}
+
 {% endblock %}

@@ -9,20 +9,17 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
 
-from wagtail.wagtailcore.models import Site
+from wagtail.core.models import Site
 
 from opentech.apply.funds.models import ApplicationSubmission
-from opentech.apply.funds.workflow import SingleStage
+from opentech.apply.funds.workflow import Request
 
 from .factories import (
-    ApplicationFormFactory,
     ApplicationSubmissionFactory,
     CustomFormFieldsFactory,
     FundTypeFactory,
     LabFactory,
-    LabFormFactory,
     RoundFactory,
-    RoundFormFactory,
 )
 
 
@@ -36,7 +33,7 @@ class TestFundModel(TestCase):
 
     def test_can_access_workflow_class(self):
         self.assertEqual(self.fund.workflow_name, 'single')
-        self.assertEqual(self.fund.workflow_class, SingleStage)
+        self.assertEqual(self.fund.workflow, Request)
 
     def test_no_open_rounds(self):
         self.assertIsNone(self.fund.open_round)
@@ -188,22 +185,13 @@ class TestFormSubmission(TestCase):
         self.name = 'My Name'
 
         self.request_factory = RequestFactory()
-        # set up application form with minimal requirement for creating user
-        application_form = {
-            'form_fields__0__email__': '',
-            'form_fields__1__full_name__': '',
-            'form_fields__2__title__': '',
-        }
-        form = ApplicationFormFactory(**application_form)
         fund = FundTypeFactory()
 
         self.site.root_page = fund
         self.site.save()
 
         self.round_page = RoundFactory(parent=fund)
-        RoundFormFactory(round=self.round_page, form=form)
         self.lab_page = LabFactory(lead=self.round_page.lead)
-        LabFormFactory(lab=self.lab_page, form=form)
 
     def submit_form(self, page=None, email=None, name=None, user=AnonymousUser()):
         if email is None:
@@ -213,32 +201,33 @@ class TestFormSubmission(TestCase):
 
         page = page or self.round_page
         fields = page.get_form_fields()
-        data = {k: v for k, v in zip(fields, [email, name, 'project'])}
+        data = {k: v for k, v in zip(fields, ['project', 0, email, name])}
 
         request = self.request_factory.post('', data)
         request.user = user
         request.site = self.site
 
         try:
-            return page.get_parent().serve(request)
+            response = page.get_parent().serve(request)
         except AttributeError:
-            return page.serve(request)
+            response = page.serve(request)
+
+        self.assertNotContains(response, 'There where some errors with your form')
+        return response
 
     def test_workflow_and_status_assigned(self):
         self.submit_form()
         submission = ApplicationSubmission.objects.first()
-        first_phase = self.round_page.workflow.first()
-        self.assertEqual(submission.workflow_name, self.round_page.workflow_name)
-        self.assertEqual(submission.status, str(first_phase))
-        self.assertEqual(submission.status_name, first_phase.name)
+        first_phase = list(self.round_page.workflow.keys())[0]
+        self.assertEqual(submission.workflow, self.round_page.workflow)
+        self.assertEqual(submission.status, first_phase)
 
     def test_workflow_and_status_assigned_lab(self):
         self.submit_form(page=self.lab_page)
         submission = ApplicationSubmission.objects.first()
-        first_phase = self.lab_page.workflow.first()
-        self.assertEqual(submission.workflow_name, self.lab_page.workflow_name)
-        self.assertEqual(submission.status, str(first_phase))
-        self.assertEqual(submission.status_name, first_phase.name)
+        first_phase = list(self.lab_page.workflow.keys())[0]
+        self.assertEqual(submission.workflow, self.lab_page.workflow)
+        self.assertEqual(submission.status, first_phase)
 
     def test_can_submit_if_new(self):
         self.submit_form()
@@ -263,14 +252,15 @@ class TestFormSubmission(TestCase):
         self.assertEqual(ApplicationSubmission.objects.first().user, user)
 
     def test_associated_if_another_user_exists(self):
+        email = 'another@email.com'
         self.submit_form()
         # Someone else submits a form
-        self.submit_form(email='another@email.com')
+        self.submit_form(email=email)
 
         # Lead + 2 x applicant
         self.assertEqual(self.User.objects.count(), 3)
 
-        _, first_user, second_user = self.User.objects.all()
+        first_user, second_user = self.User.objects.get(email=self.email), self.User.objects.get(email=email)
         self.assertEqual(ApplicationSubmission.objects.count(), 2)
         self.assertEqual(ApplicationSubmission.objects.first().user, first_user)
         self.assertEqual(ApplicationSubmission.objects.last().user, second_user)
@@ -320,6 +310,9 @@ class TestFormSubmission(TestCase):
 class TestApplicationSubmission(TestCase):
     def make_submission(self, **kwargs):
         return ApplicationSubmissionFactory(**kwargs)
+
+    def refresh(self, instance):
+        return instance.__class__.objects.get(id=instance.id)
 
     def test_can_get_required_block_names(self):
         email = 'test@test.com'
@@ -374,3 +367,53 @@ class TestApplicationSubmission(TestCase):
         submission = self.make_submission(form_data__image__filename=filename)
         save_path = os.path.join(settings.MEDIA_ROOT, submission.save_path(filename))
         self.assertTrue(os.path.isfile(save_path))
+
+    def test_create_revision_on_create(self):
+        submission = ApplicationSubmissionFactory()
+        self.assertEqual(submission.revisions.count(), 1)
+        self.assertDictEqual(submission.live_revision.form_data, submission.form_data)
+
+    def test_create_revision_on_data_change(self):
+        submission = ApplicationSubmissionFactory()
+        new_data = {'title': 'My Awesome Title'}
+        submission.form_data = new_data
+        submission.create_revision()
+        submission = self.refresh(submission)
+        self.assertEqual(submission.revisions.count(), 2)
+        self.assertDictEqual(submission.live_revision.form_data, new_data)
+
+    def test_dont_create_revision_on_data_same(self):
+        submission = ApplicationSubmissionFactory()
+        submission.create_revision()
+        self.assertEqual(submission.revisions.count(), 1)
+        self.assertDictEqual(submission.live_revision.form_data, submission.form_data)
+
+    def test_can_get_draft_data(self):
+        submission = ApplicationSubmissionFactory()
+        title = 'My new title'
+        submission.form_data = {'title': title}
+        submission.create_revision(draft=True)
+        self.assertEqual(submission.revisions.count(), 2)
+
+        draft_submission = submission.from_draft()
+        self.assertDictEqual(draft_submission.form_data, submission.form_data)
+        self.assertEqual(draft_submission.title, title)
+        self.assertTrue(draft_submission.is_draft, True)
+
+        with self.assertRaises(ValueError):
+            draft_submission.save()
+
+        submission = self.refresh(submission)
+        self.assertNotEqual(submission.title, title)
+
+    def test_draft_updated(self):
+        submission = ApplicationSubmissionFactory()
+        title = 'My new title'
+        submission.form_data = {'title': title}
+        submission.create_revision(draft=True)
+        self.assertEqual(submission.revisions.count(), 2)
+
+        title = 'My even newer title'
+        submission.form_data = {'title': title}
+        submission.create_revision(draft=True)
+        self.assertEqual(submission.revisions.count(), 2)

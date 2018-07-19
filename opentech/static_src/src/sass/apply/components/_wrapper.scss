@@ -242,8 +242,8 @@
         justify-content: space-between;
         margin-bottom: 20px;
     }
-  
-    &--apply-box {
+
+    &--cta-box {
         width: 385px;
         padding: 20px;
         color: $color--default;
@@ -260,16 +260,20 @@
         }
     }
 
-    &--status-bar {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
+    &--status-bar-outer {
         padding: 20px;
         background-color: $color--white;
         border-bottom: 3px solid $color--light-grey;
+    }
 
-        div:first-child {
-            padding-right: 20px;
+    &--status-bar-inner {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        margin-bottom: 20px;
+
+        @include media-query(tablet-portrait) {
+            margin-bottom: 0;
         }
     }
 
@@ -295,6 +299,10 @@
             padding-bottom: 35px;
             margin-bottom: 35px;
         }
+
+        .helptext {
+            font-size: 15px;
+        }
     }
 
     &--tabs {
@@ -302,6 +310,15 @@
 
         @include media-query(tablet-portrait) {
             padding: 4rem 0;
+        }
+    }
+
+    &--reviews-table {
+        overflow-x: scroll;
+        user-select: none;
+
+        &:hover {
+            cursor: all-scroll;
         }
     }
 }

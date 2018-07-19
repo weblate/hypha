@@ -27,11 +27,22 @@
     }
 
     &--submission-meta {
+        display: flex;
+        flex-direction: column;
+        margin-top: 20px;
+        font-weight: $weight--normal;
         color: transparentize($color--dark-grey, 0.5);
 
-        span {
-            font-weight: $weight--normal;
+        @include media-query(tablet-landscape) {
+            flex-direction: row;
+            margin-top: 0;
         }
+
+        span {
+            margin-right: 15px;
+        }
+
+
     }
 
     &--small {
@@ -46,9 +57,12 @@
         text-transform: uppercase;
     }
 
-
     &--normal {
         font-weight: $weight--normal;
+    }
+
+    &--bold {
+        font-weight: $weight--bold;
     }
 
     &--activity-feed {

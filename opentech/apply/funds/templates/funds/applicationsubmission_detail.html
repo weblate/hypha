@@ -1,17 +1,18 @@
 {% extends "base-apply.html" %}
+{% load workflow_tags %}
 {% block title %}{{ object.title }}{% endblock %}
 {% block body_class %}{% endblock %}
 {% block content %}
 <div class="wrapper wrapper--breakout wrapper--admin">
     <div class="wrapper wrapper--medium">
-        <h2 class="heading heading--no-margin">{{ object.title }}</h2>
+        <h1 class="beta heading heading--no-margin heading--bold">{{ object.title }}</h1>
         <h5 class="heading heading--meta">
             <span>{{ object.stage }}</span>
             <span>{{ object.page }}</span>
             <span>{{ object.round }}</span>
             <span>Lead: {{ object.lead }}</span>
         </h5>
-        {% include "funds/includes/status_bar.html" with workflow=object.workflow status=object.phase %}
+        {% include "funds/includes/status_bar.html" with phases=object.workflow current_phase=object.phase same_stage=True%}
 
         <div class="tabs js-tabs">
             <div class="tabs__container">
@@ -34,50 +35,66 @@
 <div class="wrapper wrapper--medium wrapper--tabs">
 {# Tab 1 #}
     <div class="tabs__content" id="tab-1">
-        {% include "funds/includes/actions.html" with mobile=True %}
+        {% block admin_actions %}
+        {% endblock %}
         <div class="wrapper wrapper--sidebar">
-            <div>
-                <h6 class="heading heading--submission-meta">
-                    <span>Submitted: </span>{{ object.submit_time.date }} by {{ object.user.get_full_name }}
-                </h6>
-
-                <h3>Proposal Information</h3>
-                <div class="grid grid--proposal-info">
-                    <div>
-                        <h5>Requested Funding</h5>
-                        <p>{{ object.value }}</p>
-                    </div>
-
-                    <div>
-                        <h5>Project Duration</h5>
-                        <p>{{ object.value }}</p>
-                    </div>
-
-                    <div>
-                        <h5>Legal Name</h5>
-                        <p>{{ object.full_name }}</p>
-                    </div>
-
-                    <div>
-                        <h5>Email</h5>
-                        <p>{{ object.email }}</p>
-                    </div>
+            {% if request.user|has_edit_perm:object and object.status == 'draft_proposal' and not request.user.is_apply_staff %}
+                <div>
+                    <h4>Congratulations!</h4>
+                    <h5>Your {{ object.previous.stage }} application has been accepted.</h5>
+                    <a class="button button--primary" href="{% url 'funds:submissions:edit' object.id %}">Start your {{ object.stage }} application</a>
                 </div>
-                <div class="rich-text rich-text--answers">
-                    {{ object.render_answers }}
+            {% else %}
+                <div>
+                    <h6 class="heading heading--submission-meta">
+                        <span>Submitted: <strong>{{ object.submit_time.date }} by {{ object.user.get_full_name }}</strong></span>
+                        <span>Last edited: <strong>{{ object.last_edit.timestamp.date }} by {{ object.last_edit.user.get_full_name }}</strong></span>
+                        {% if request.user|has_edit_perm:object and object.user == request.user %}
+                            <a class="link link--edit-submission is-active" href="{% url 'funds:submissions:edit' object.id %}">
+                                Edit
+                                <svg class="icon icon--pen"><use xlink:href="#pen"></use></svg>
+                            </a>
+                        {% else %}
+                            <span class="link link--edit-submission">
+                                Edit
+                                <svg class="icon icon--padlock"><use xlink:href="#padlock"></use></svg>
+                            </span>
+                        {% endif %}
+                    </h6>
+
+                    {% include "funds/includes/rendered_answers.html" %}
                 </div>
-            </div>
+            {% endif %}
 
             <aside class="sidebar">
-                {% block sidebar_forms %}
+                {% if request.user.is_apply_staff %}
+                    {% block sidebar_forms %}
+                    {% endblock %}
+                {% endif %}
+
+                {% block determination %}
+                    {% include 'determinations/includes/determination_block.html' with submission=object %}
                 {% endblock %}
 
-                {% if other_submissions %}
+                {% block reviews %}
+                {% endblock %}
+
+                {% if other_submissions or object.previous %}
                     <div class="sidebar__inner">
-                        <h6 class="heading heading--light-grey heading--small heading--uppercase">Past Submissions</h6>
+                        {% if object.previous %}
+                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.previous.id %}">View linked {{ object.previous.stage }}</a></h6>
+                        {% endif %}
+
+                        {% if object.next %}
+                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.next.id %}">View linked {{ object.next.stage }}</a></h6>
+                        {% endif %}
 
                         {% for submission in other_submissions %}
-                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submission' submission.id %}">{{ submission.title }}</a></h6>
+                            {% if forloop.first %}
+                                <h6 class="heading heading--light-grey heading--small heading--uppercase">Past Submissions</h6>
+                            {% endif %}
+
+                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' submission.id %}">{{ submission.title }}</a></h6>
                         {% endfor %}
                     </div>
                 {% endif %}

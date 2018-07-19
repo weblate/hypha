@@ -1,0 +1,34 @@
+{% extends "base-apply.html" %}
+{% load bleach_tags review_tags workflow_tags %}
+
+{% block title %}Reviews{% endblock %}
+
+{% block content %}
+<div class="wrapper wrapper--breakout wrapper--admin">
+    <div class="wrapper wrapper--medium">
+        <div>
+            <h1 class="beta heading heading--no-margin heading--bold">Reviews</h1>
+            <h5>For <a href="{% url "funds:submissions:detail" submission.id %}">{{ submission.title }}</a></h5>
+        </div>
+        {% if request.user|has_review_perm:submission %}
+            {% if request.user|has_draft:submission or request.user|can_review:submission %}
+                <div class="wrapper wrapper--cta-box">
+                    {% include 'review/includes/review_button.html' with submission=submission %}
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+<div class="wrapper wrapper--reviews-table js-reviews-table">
+    <table class="reviews-list">
+    {% for question, answers in review_data.items %}
+        <tr class="reviews-list__tr">
+            <th class="reviews-list__th">{{ question }}</th>
+            {% for answer in answers %}
+                <td class="reviews-list__td">{{ answer|bleach }}</td>
+            {% endfor %}
+        </tr>
+    {% endfor %}
+    </table>
+</div>
+{% endblock %}

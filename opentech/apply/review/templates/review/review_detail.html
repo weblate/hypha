@@ -1,0 +1,34 @@
+{% extends "base-apply.html" %}
+{% load bleach_tags %}
+
+{% block content %}
+<div class="wrapper wrapper--breakout wrapper--admin">
+    <div class="wrapper wrapper--large">
+        <h1 class="beta heading heading--no-margin heading--bold">Review</h1>
+        <h5>For <a href="{% url "funds:submissions:detail" review.submission.id %}">{{ review.submission.title }}</a></h5>
+    </div>
+</div>
+
+<div class="grid">
+    <div>
+        <h5>Recommendation</h5>
+        <p>{{ review.recommendation }}</p>
+    </div>
+    <div>
+        <h5>Score</h5>
+        <p>{{ review.score }}</p>
+    </div>
+</div>
+
+<div class="rich-text rich-text--answers">
+    {% for question, answer in review_data.items %}
+        {% if answer == "<field_group_title>" %}
+            {# Field group title #}
+            <h4>{{ question }}</h4>
+        {% else %}
+            <h5>{{ question }}</h5>
+            {{ answer|bleach }}
+        {% endif %}
+    {% endfor %}
+</div>
+{% endblock %}

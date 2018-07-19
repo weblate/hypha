@@ -6,20 +6,20 @@ table {
     border-collapse: collapse;
     table-layout: fixed;
 
-    thead {
-        display: none;
+    // table head
+    th {
+        padding: 20px 15px;
+        font-size: 15px;
+        font-weight: 600;
+        text-align: left;
 
-        @include media-query($table-breakpoint) {
-            display: table-header-group;
-        }
-
-        tr {
-            &:hover {
-                box-shadow: none;
-            }
+        a {
+            color: $color--mid-dark-grey;
+            transition: color 0.25s ease-out;
         }
     }
 
+    // tale rows
     tr {
         border: 1px solid $color--light-mid-grey;
         transition: box-shadow 0.15s ease;
@@ -30,52 +30,23 @@ table {
             border-bottom: 2px solid $color--light-grey;
             border-left: 0;
 
+            &.is-expanded {
+                border-bottom: 1px solid $color--light-mid-grey;
+            }
+
             &:hover {
                 box-shadow: 0 6px 35px -13px $color--black-50;
             }
         }
 
+        // responsive table styles
         > td {
             display: block;
             width: 100%;
 
-
             @include media-query($table-breakpoint) {
                 display: table-cell;
                 width: initial;
-                height: 90px;
-            }
-
-            &:first-child {
-                padding-top: 20px;
-            }
-
-            &:last-child {
-                padding-bottom: 20px;
-            }
-
-            &.title {
-                font-weight: $weight--bold;
-
-                a {
-                    color: $color--primary;
-
-                    @include media-query($table-breakpoint) {
-                        color: $color--dark-grey;
-                    }
-                }
-            }
-
-            &.status_name {
-                span {
-                    display: inline-block;
-                    padding: 10px;
-                    font-size: 13px;
-                    font-weight: $weight--bold;
-                    color: $color--marine;
-                    text-align: center;
-                    background-color: $color--sky-blue;
-                }
             }
         }
     }
@@ -85,47 +56,7 @@ table {
         padding: 5px 20px;
 
         @include media-query($table-breakpoint) {
-            padding: 20px;
-        }
-    }
-
-    th {
-        padding: 20px;
-        font-size: 15px;
-        font-weight: 600;
-        text-align: left;
-
-        a {
-            color: $color--mid-dark-grey;
-            transition: color 0.25s ease-out;
-        }
-
-        &.desc,
-        &.asc {
-            position: relative;
-            color: $color--dark-grey;
-
-            &::after {
-                position: absolute;
-                top: 25px;
-                margin-left: 10px;
-            }
-
-            a {
-                color: inherit;
-            }
-        }
-
-        &.desc {
-            &::after {
-                @include triangle(top, $color--default, 5px);
-            }
-        }
-
-        &.asc {
-            &::after {
-                @include triangle(bottom, $color--default, 5px);
-            }
+            padding: 15px 10px;
         }
     }
 }

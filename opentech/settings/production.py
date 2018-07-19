@@ -11,16 +11,11 @@ from .base import *  # noqa
 # Disable debug mode
 DEBUG = False
 
-# Raven (sentry) configuration.
+# Raven (sentry) configuration. See local settings for DSN
 
-# INSTALLED_APPS += (
-#     'raven.contrib.django.raven_compat',
-# )
-
-# RAVEN_CONFIG = {
-#     'dsn': '<PUT DSN URL HERE>?verify_ssl=0',
-#     'release': raven.fetch_git_sha(BASE_DIR),
-# }
+INSTALLED_APPS += (
+    'raven.contrib.django.raven_compat',
+)
 
 
 # Cache everything for 10 minutes
@@ -70,10 +65,10 @@ if 'EMAIL_SUBJECT_PREFIX' in env:
     EMAIL_SUBJECT_PREFIX = env['EMAIL_SUBJECT_PREFIX']
 
 if 'CACHE_PURGE_URL' in env:
-    INSTALLED_APPS += ('wagtail.contrib.wagtailfrontendcache', )  # noqa
+    INSTALLED_APPS += ('wagtail.contrib.frontend_cache', )  # noqa
     WAGTAILFRONTENDCACHE = {
         'default': {
-            'BACKEND': 'wagtail.contrib.wagtailfrontendcache.backends.HTTPBackend',
+            'BACKEND': 'wagtail.contrib.frontend_cache.backends.HTTPBackend',
             'LOCATION': env['CACHE_PURGE_URL'],
         },
     }
