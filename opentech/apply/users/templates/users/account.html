@@ -3,61 +3,56 @@
 
 {% block title %}Account{% endblock %}
 
-
 {% block content %}
-<div class="wrapper wrapper--breakout wrapper--admin">
-    <div class="wrapper wrapper--large wrapper--search">
-        <h3>Welcome {{ user }}</h3>
+<div class="admin-bar">
+    <div class="admin-bar__inner admin-bar__inner--with-button">
+        <h3 class="admin-bar__heading">Welcome {{ user }}</h3>
+        <a href="{% url 'dashboard:dashboard' %}" class="button button--primary button--arrow-pixels-white">
+            Go to dashboard
+            <svg><use xlink:href="#arrow-head-pixels--solid"></use></svg>
+        </a>
     </div>
 </div>
 
-<div class="wrapper wrapper--large wrapper--inner-space-medium">
-    <h3>Profile</h3>
-    <form action="" method="post" class="form">
-        {% csrf_token %}
-        {% for field in form %}
-            {% include "funds/includes/field.html" %}
-        {% endfor %}
-        <button class="button button--primary" type="submit">{% trans "Update Profile" %}</button>
-    </form>
-</div>
-
-<div class="wrapper wrapper--large wrapper--inner-space-medium">
-    {% if show_change_password and user.has_usable_password and not backends.associated %}
-        <h3>Change password</h3>
-        <a class="button button--primary" href="{% url 'users:password_change' %}">{% trans "Update password" %}</a>
-    {% endif %}
-</div>
-
-<div class="wrapper wrapper--large wrapper--inner-space-medium">
-    {% if swappable %}
-        <form action="{% url 'users:become' %}" method="post" class="form">
+<div class="profile">
+    <div class="profile__column">
+        <h3>Profile</h3>
+        <form action="" method="post" class="form">
             {% csrf_token %}
-            {% for user in swappable %}
-                {% if forloop.first %}
-                <label for="user" class="form__question">Become: </label>
-                <div class="form__item">
-                <div class="form__select">
-                    <select name="user" id="user">
-                {% endif %}
-                    <option value="{{ user.id }}">{{ user }}</option>
-                {% if forloop.last %}
-                    </select>
-                </div>
-                </div>
-                <p class="form__help">Only includes active, non-superusers</p>
-                {% endif %}
+            {% for field in form %}
+                {% include "forms/includes/field.html" %}
             {% endfor %}
-            <button class="button button--primary" type="submit">Become</button>
+            <button class="button button--primary" type="submit">{% trans "Update Profile" %}</button>
         </form>
+    </div>
+
+    {% if show_change_password and user.has_usable_password and not backends.associated %}
+        <div class="profile__column">
+            <h3>Change password</h3>
+            <a class="button button--primary" href="{% url 'users:password_change' %}">{% trans "Update password" %}</a>
+        </div>
     {% endif %}
 
-    {# Remove the comment block tags below when such need arises. e.g. adding new providers #}
-    {% comment %}
-    {% can_use_oauth as show_oauth_link %}
-    {% if show_oauth_link %}
-        <a href="{% url 'users:oauth' %}">{% trans "Manage OAuth" %}</a>
-    {% endif %}
-    {% endcomment %}
+    <div class="profile__column">
+        {% if swappable_form %}
+            <h3>Become:</h3>
+            <form action="{% url 'users:become' %}" method="post" class="form">
+                {{ swappable_form.media }}
+                {% csrf_token %}
+                {% for field in swappable_form %}
+                    {% include "forms/includes/field.html" %}
+                {% endfor %}
+                <button class="button button--primary" type="submit">Become</button>
+            </form>
+        {% endif %}
+
+        {# Remove the comment block tags below when such need arises. e.g. adding new providers #}
+        {% comment %}
+        {% can_use_oauth as show_oauth_link %}
+        {% if show_oauth_link %}
+            <a href="{% url 'users:oauth' %}">{% trans "Manage OAuth" %}</a>
+        {% endif %}
+        {% endcomment %}
+    </div>
 </div>
 {% endblock %}

@@ -1,10 +1,12 @@
 {% extends "base-apply.html" %}
 {% load bleach_tags %}
 
+{% block title %}Determination for {{ determination.submission.title }}{% endblock %}
+
 {% block content %}
-<div class="wrapper wrapper--breakout wrapper--admin">
-    <div class="wrapper wrapper--large">
-        <h2 class="heading heading--no-margin">Determination</h2>
+<div class="admin-bar">
+    <div class="admin-bar__inner">
+        <h2 class="heading heading--no-margin">Determination {% if determination.is_draft %}[DRAFT]{% endif %}</h2>
         <h5>For <a href="{% url "funds:submissions:detail" determination.submission.id %}">{{ determination.submission.title }}</a></h5>
     </div>
 </div>
@@ -16,17 +18,13 @@
     </div>
 </div>
 
-    {% if can_view_extended_data %}
-        <div class="rich-text rich-text--answers">
-            {% for question, answer in determination_data.items %}
-                {% if answer == "<field_group_title>" %}
-                    {# Field group title #}
-                    <h4>{{ question }}</h4>
-                {% else %}
-                    <h5>{{ question }}</h5>
-                    {% if answer %}{{ answer|bleach }}{% else %}&mdash;{% endif %}
-                {% endif %}
-            {% endfor %}
-        </div>
-    {% endif %}
+<div class="rich-text rich-text--answers">
+    {% for group in determination.detailed_data.values %}
+        <h4>{{ group.title }}</h4>
+        {% for question, answer in group.questions %}
+            <h5>{{ question }}</h5>
+            {% if answer %}{{ answer|bleach }}{% else %}-{% endif %}
+        {% endfor %}
+    {% endfor %}
+</div>
 {% endblock %}

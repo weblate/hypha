@@ -1,7 +1,9 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.core import validators
 from django.db import models
+from django.utils.deconstruct import deconstructible
 
 from modelcluster.fields import ParentalKey
 from wagtail.admin.edit_handlers import (
@@ -14,6 +16,7 @@ from wagtail.admin.edit_handlers import (
 )
 from wagtail.core.fields import StreamField
 from wagtail.images.edit_handlers import ImageChooserPanel
+from wagtail.search import index
 
 from opentech.public.utils.models import (
     BasePage,
@@ -23,38 +26,62 @@ from opentech.public.utils.models import (
 from .blocks import FundBlock, LabBlock
 
 
-class FundPageRelatedPage(RelatedPage):
-    source_page = ParentalKey('FundPage', related_name='related_pages')
+class BaseApplicationRelatedPage(RelatedPage):
+    source_page = ParentalKey('BaseApplicationPage', related_name='related_pages')
 
 
-class FundPage(BasePage):
+class BaseApplicationPage(BasePage):
     subpage_types = []
-    parent_page_types = ['FundIndex']
+    parent_page_types = []
+
+    application_type_model = ''
 
     introduction = models.TextField(blank=True)
-    fund_type = models.ForeignKey(
+    application_type = models.ForeignKey(
         'wagtailcore.Page',
         blank=True,
         null=True,
         on_delete=models.SET_NULL,
-        related_name='fund_public',
+        related_name='application_public',
     )
     body = StreamField(FundBlock())
 
+    search_fields = BasePage.search_fields + [
+        index.SearchField('introduction'),
+        index.SearchField('body')
+    ]
+
     content_panels = BasePage.content_panels + [
         FieldPanel('introduction'),
-        PageChooserPanel('fund_type', 'funds.FundType'),
         StreamFieldPanel('body'),
         InlinePanel('related_pages', label="Related pages"),
     ]
 
+    def get_template(self, request, *args, **kwargs):
+        # Make sure all children use the shared template
+        return 'public_funds/fund_page.html'
+
+    can_open = True
+
     @property
     def is_open(self):
-        return bool(self.fund_type.specific.open_round)
+        return self.application_type and bool(self.application_type.specific.open_round)
 
     @property
     def deadline(self):
-        return self.fund_type.specific.next_deadline()
+        return self.application_type and self.application_type.specific.next_deadline()
+
+
+class FundPage(BaseApplicationPage):
+    parent_page_types = ['FundIndex']
+    content_panels = BaseApplicationPage.content_panels[:]
+    content_panels.insert(-2, PageChooserPanel('application_type', 'funds.FundType'))
+
+
+class RFPPage(BaseApplicationPage):
+    parent_page_types = ['LabPage']
+    content_panels = BaseApplicationPage.content_panels[:]
+    content_panels.insert(-2, PageChooserPanel('application_type', 'funds.RequestForPartners'))
 
 
 class FundIndex(BasePage):
@@ -89,8 +116,21 @@ class LabPageRelatedPage(RelatedPage):
     source_page = ParentalKey('LabPage', related_name='related_pages')
 
 
+@deconstructible
+class MailToAndURLValidator:
+    email_validator = validators.EmailValidator()
+    url_validator = validators.URLValidator()
+
+    def __call__(self, value):
+        if value.startswith('mailto://'):
+            mail_to, email = value.rsplit('://', 1)
+            self.email_validator(email)
+        else:
+            self.url_validator(value)
+
+
 class LabPage(BasePage):
-    subpage_types = []
+    subpage_types = ['RFPPage']
     parent_page_types = ['LabIndex']
 
     introduction = models.TextField(blank=True)
@@ -108,9 +148,14 @@ class LabPage(BasePage):
         on_delete=models.SET_NULL,
         related_name='lab_public',
     )
-    lab_link = models.URLField(blank=True, verbose_name='External link')
+    lab_link = models.CharField(blank=True, max_length=255, verbose_name='External link', validators=[MailToAndURLValidator()])
     link_text = models.CharField(max_length=255, help_text='Text to display on the button for external links', blank=True)
     body = StreamField(LabBlock())
+
+    search_fields = BasePage.search_fields + [
+        index.SearchField('introduction'),
+        index.SearchField('body')
+    ]
 
     content_panels = BasePage.content_panels + [
         ImageChooserPanel('icon'),
@@ -126,9 +171,19 @@ class LabPage(BasePage):
         InlinePanel('related_pages', label="Related pages"),
     ]
 
+    def get_context(self, request):
+        context = super().get_context(request)
+        context['rfps'] = self.get_children().live().public()
+        return context
+
+    can_open = True
+
     @property
     def is_open(self):
-        return bool(self.lab_type.specific.open_round)
+        try:
+            return bool(self.lab_type.specific.open_round)
+        except AttributeError:
+            return bool(self.lab_link)
 
     def clean(self):
         if self.lab_type and self.lab_link:

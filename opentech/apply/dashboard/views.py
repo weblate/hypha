@@ -11,7 +11,7 @@ from opentech.apply.utils.views import ViewDispatcher
 class AdminDashboardView(TemplateView):
 
     def get(self, request, *args, **kwargs):
-        qs = ApplicationSubmission.objects.all()
+        qs = ApplicationSubmission.objects.all().for_table(self.request.user)
 
         in_review = SubmissionsTable(qs.in_review_for(request.user), prefix='in-review-')
         RequestConfig(request, paginate={'per_page': 10}).configure(in_review)
@@ -28,6 +28,26 @@ class AdminDashboardView(TemplateView):
         })
 
 
+class ReviewerDashboardView(TemplateView):
+    def get(self, request, *args, **kwargs):
+        qs = ApplicationSubmission.objects.all().for_table(self.request.user)
+
+        my_review_qs = qs.in_review_for(request.user)
+        my_review = SubmissionsTable(my_review_qs, prefix='my-review-')
+        RequestConfig(request, paginate={'per_page': 10}).configure(my_review)
+
+        also_in_review = AdminSubmissionsTable(
+            qs.in_review_for(request.user, assigned=False).exclude(id__in=my_review_qs),
+            prefix='also-in-review-'
+        )
+        RequestConfig(request, paginate={'per_page': 10}).configure(also_in_review)
+
+        return render(request, 'dashboard/reviewer_dashboard.html', {
+            'my_review': my_review,
+            'also_in_review': also_in_review,
+        })
+
+
 class ApplicantDashboardView(SingleTableView):
     template_name = 'dashboard/applicant_dashboard.html'
     model = ApplicationSubmission
@@ -36,7 +56,7 @@ class ApplicantDashboardView(SingleTableView):
     def get_queryset(self):
         return self.model.objects.filter(
             user=self.request.user
-        ).inactive().current()
+        ).inactive().current().for_table(self.request.user)
 
     def get_context_data(self, **kwargs):
         my_active_submissions = self.model.objects.filter(
@@ -55,9 +75,5 @@ class ApplicantDashboardView(SingleTableView):
 
 class DashboardView(ViewDispatcher):
     admin_view = AdminDashboardView
+    reviewer_view = ReviewerDashboardView
     applicant_view = ApplicantDashboardView
-
-    def admin_check(self, request):
-        if request.user.is_reviewer:
-            return True
-        return super().admin_check(request)

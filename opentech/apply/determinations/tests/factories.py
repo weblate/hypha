@@ -12,8 +12,12 @@ class DeterminationDataFactory(factory.DictFactory):
         submission = kwargs.pop('submission')
         form = get_form_for_stage(submission)(user=submission.lead, submission=submission)
         form_fields = {}
-        for field_name, field in form.fields.items():
-            form_fields[field_name] = 0
+
+        form_fields = {
+            field_name: 0
+            for field_name, field in form.fields.items()
+            if field_name not in form._meta.fields
+        }
 
         form_fields.update(**kwargs)
         return super()._build(model_class, *args, **form_fields)
@@ -24,10 +28,9 @@ class DeterminationFactory(factory.DjangoModelFactory):
         model = Determination
 
     class Params:
-        submitted = factory.Trait(outcome=ACCEPTED, is_draft=False)
         accepted = factory.Trait(outcome=ACCEPTED)
         rejected = factory.Trait(outcome=REJECTED)
-        not_draft = factory.Trait(is_draft=False)
+        submitted = factory.Trait(is_draft=False)
 
     submission = factory.SubFactory(ApplicationSubmissionFactory)
     author = factory.SelfAttribute('submission.lead')

@@ -84,8 +84,15 @@ class ProjectPageRelatedPage(RelatedPage):
     ]
 
 
+class ProjectFundingQueryset(models.QuerySet):
+    def projects(self):
+        return ProjectPage.objects.filter(id__in=self.values_list('page__id')).live().public()
+
+
 class ProjectFunding(BaseFunding):
     page = ParentalKey('ProjectPage', related_name='funding')
+
+    objects = ProjectFundingQueryset.as_manager()
 
 
 class ProjectPage(FundingMixin, BasePage):
@@ -98,6 +105,8 @@ class ProjectPage(FundingMixin, BasePage):
 
     subpage_types = []
     parent_page_types = ['ProjectIndexPage']
+
+    drupal_id = models.IntegerField(null=True, blank=True, editable=False)
 
     introduction = models.TextField(blank=True)
     icon = models.ForeignKey(
@@ -154,7 +163,7 @@ class ProjectIndexPage(BasePage):
 
     def get_context(self, request, *args, **kwargs):
         context = super().get_context(request, *args, **kwargs)
-        subpages = self.get_children().live()
+        subpages = ProjectPage.objects.descendant_of(self).live().public().select_related('icon')
         per_page = settings.DEFAULT_PER_PAGE
         page_number = request.GET.get('page')
         paginator = Paginator(subpages, per_page)

@@ -90,6 +90,8 @@ class NewsPage(BasePage):
     subpage_types = []
     parent_page_types = ['NewsIndex']
 
+    drupal_id = models.IntegerField(null=True, blank=True, editable=False)
+
     # It's datetime for easy comparison with first_published_at
     publication_date = models.DateTimeField(
         null=True, blank=True,
@@ -129,7 +131,10 @@ class NewsIndex(BasePage):
     def get_context(self, request, *args, **kwargs):
         news = NewsPage.objects.live().public().descendant_of(self).annotate(
             date=Coalesce('publication_date', 'first_published_at')
-        ).order_by('-date')
+        ).order_by('-date').prefetch_related(
+            'news_types__news_type',
+            'authors__author',
+        )
 
         if request.GET.get('news_type'):
             news = news.filter(news_types__news_type=request.GET.get('news_type'))

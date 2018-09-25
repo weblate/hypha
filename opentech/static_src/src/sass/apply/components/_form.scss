@@ -1,4 +1,6 @@
 .form {
+    $root: &;
+
     &--with-p-tags {
         p {
             margin: 0 0 10px;
@@ -31,6 +33,11 @@
 
         @include media-query(tablet-portrait) {
             margin: 2rem 0;
+
+            // reduce spacing on the profile page
+            .profile & {
+                margin: 1rem 0;
+            }
         }
 
         &:nth-of-type(1) {
@@ -88,7 +95,7 @@
             @include button($color--light-blue, $color--dark-blue);
             max-width: 290px;
             text-align: center;
-            background: url('./../../images/upload.svg') $color--light-blue no-repeat 50px center;
+            background: url('./../../images/upload.svg') $color--light-blue no-repeat 40px center;
             border: 0;
 
             .no-js & {
@@ -96,7 +103,7 @@
             }
 
             &:hover {
-                background: url('./../../images/upload.svg') $color--dark-blue no-repeat 50px center;
+                background: url('./../../images/upload.svg') $color--dark-blue no-repeat 40px center;
 
                 .no-js & {
                     background: none;
@@ -129,7 +136,7 @@
             flex-direction: column;
             padding: 0;
 
-            .select2 .select2-selection.select2-selection--single {
+            .select2 .select2-selection.select2-selection--single { // sass-lint:disable-line force-element-nesting
                 border: 0;
                 border-top: 1px solid $color--mid-grey;
 
@@ -140,6 +147,7 @@
                 }
             }
 
+            // so the form can be output in any tag
             > * {
                 flex-basis: auto;
                 margin: 0;
@@ -162,6 +170,10 @@
 
     &__help {
         @extend %h6;
+
+        .profile & {
+            margin-top: 0;
+        }
     }
 
     &__item {
@@ -175,12 +187,16 @@
     }
 
     &__select {
-        max-width: 100%;
+        max-width: 385px;
         background: url('./../../images/dropdown.svg') $color--white no-repeat 95% center;
         background-size: 8px;
 
-        @include media-query(tablet-portrait) {
-            max-width: 385px;
+        .form--scoreable & {
+            margin-top: 20px;
+        }
+
+        .form__filters & {
+            max-width: 100%;
         }
 
         select[multiple='multiple'] {
@@ -195,7 +211,7 @@
             -moz-appearance: none; // sass-lint:disable-line no-vendor-prefixes
 
             option {
-                background-color: white;
+                background-color: $color--white;
             }
         }
 
@@ -217,6 +233,11 @@
         max-width: 385px;
         padding: 10px;
         border: 1px solid $color--mid-grey;
+
+        &:disabled {
+            color: $color--black-50;
+            cursor: not-allowed;
+        }
     }
 
     &__error {
@@ -258,7 +279,6 @@
                 content: '';
             }
         }
-
     }
 
     // make date & time input siblings inline
@@ -288,7 +308,7 @@
     [type='radio'],
     [type='checkbox'] {
         position: absolute;
-        top: 10px;
+        top: 5px;
         left: 5px;
         z-index: -1;
         width: 1px;

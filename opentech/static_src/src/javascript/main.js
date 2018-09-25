@@ -6,6 +6,7 @@ import Tabs from './components/tabs';
 import listInputFiles from './components/list-input-files';
 import toggleActionsPanel from './components/toggle-actions-panel';
 import activityFeed from './components/activity-feed';
+import messages from './components/messages';
 import fancyboxGlobal from './components/fancybox-global';
 import allSubmissions from './components/all-submissions-table';
 import allReviews from './components/all-reviews-table';
@@ -36,9 +37,9 @@ import toggleReviewers from './components/toggle-reviewers';
             new Tabs($(el));
         });
 
-        $(DeterminationCopy.selector()).each((index, el) => {
-            new DeterminationCopy($(el));
-        });
+        // $(DeterminationCopy.selector()).each((index, el) => {
+        //     new DeterminationCopy($(el));
+        // });
 
         // Add tooltips to truncated titles on submissions overview table
         generateTooltips();
@@ -55,11 +56,14 @@ import toggleReviewers from './components/toggle-reviewers';
         // Activity feed logic
         activityFeed();
 
+        // messages logic
+        messages();
+
         // Submissions overview table logic
         allSubmissions();
 
         // All reviews table logic
-        allReviews();
+        // allReviews();
 
         // Submission filters logic
         submissionFilters();

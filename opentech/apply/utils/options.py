@@ -1,9 +1,9 @@
 from tinymce.widgets import TinyMCE
 
-
-RICH_TEXT_WIDGET = TinyMCE(mce_attrs={
+MCE_ATTRIBUTES = {
     'elementpath': False,
     'branding': False,
+    'entity_encoding': 'raw',
     'toolbar1': 'undo redo | styleselect | bold italic | bullist numlist | link',
     'style_formats': [
         {'title': 'Headers', 'items': [
@@ -17,5 +17,8 @@ RICH_TEXT_WIDGET = TinyMCE(mce_attrs={
             {'title': 'Underline', 'icon': 'underline', 'format': 'underline'},
         ]},
     ],
-    'height': 180,
-})
+}
+MCE_ATTRIBUTES_SHORT = {**MCE_ATTRIBUTES, **{'height': 180}}
+
+RICH_TEXT_WIDGET = TinyMCE(mce_attrs=MCE_ATTRIBUTES)
+RICH_TEXT_WIDGET_SHORT = TinyMCE(mce_attrs=MCE_ATTRIBUTES_SHORT)

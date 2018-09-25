@@ -1,91 +1,22 @@
 import json
 import random
-import uuid
-
-from django.core.files.uploadedfile import InMemoryUploadedFile
-
 import factory
-from wagtail.core.blocks import CharBlock
-import wagtail_factories
 
-from opentech.apply.stream_forms import blocks as stream_blocks
 from opentech.apply.funds import blocks
+from opentech.apply.stream_forms.testing.factories import (
+    CharFieldBlockFactory,
+    FileFieldBlockFactory,
+    FormFieldBlockFactory,
+    ImageFieldBlockFactory,
+    MultiFileFieldBlockFactory,
+    NumberFieldBlockFactory,
+    RadioFieldBlockFactory,
+    ParagraphBlockFactory,
+    StreamFieldUUIDFactory,
+)
+from opentech.apply.utils.testing.factories import RichTextFieldBlockFactory
 
-
-__all__ = ['CustomFormFieldsFactory', 'FormFieldBlockFactory', 'FullNameBlockFactory', 'EmailBlockFactory']
-
-
-class CharBlockFactory(wagtail_factories.blocks.BlockFactory):
-    class Meta:
-        model = CharBlock
-
-
-class FormFieldBlockFactory(wagtail_factories.StructBlockFactory):
-    default_value = factory.Faker('word')
-
-    class Meta:
-        model = stream_blocks.FormFieldBlock
-
-    @classmethod
-    def make_answer(cls, params=dict()):
-        return cls.default_value.generate(params)
-
-
-class CharFieldBlockFactory(FormFieldBlockFactory):
-    default_value = factory.Faker('sentence')
-
-    class Meta:
-        model = stream_blocks.CharFieldBlock
-
-
-class NumberFieldBlockFactory(FormFieldBlockFactory):
-    default_value = 100
-
-    class Meta:
-        model = stream_blocks.NumberFieldBlock
-
-    @classmethod
-    def make_answer(cls, params=dict()):
-        return cls.default_value
-
-
-class RadioFieldBlockFactory(FormFieldBlockFactory):
-    choices = ['first', 'second']
-
-    class Meta:
-        model = stream_blocks.RadioButtonsFieldBlock
-
-    @classmethod
-    def make_answer(cls, params=dict()):
-        return cls.choices[0]
-
-
-class UploadableMediaFactory(FormFieldBlockFactory):
-    default_value = factory.django.FileField
-
-    @classmethod
-    def make_answer(cls, params=dict()):
-        file_name, file = cls.default_value()._make_content(params)
-        return InMemoryUploadedFile(file, 'file', file_name, None, file.tell(), None)
-
-
-class ImageFieldBlockFactory(UploadableMediaFactory):
-    class Meta:
-        model = stream_blocks.ImageFieldBlock
-
-
-class FileFieldBlockFactory(UploadableMediaFactory):
-    class Meta:
-        model = stream_blocks.FileFieldBlock
-
-
-class MultiFileFieldBlockFactory(UploadableMediaFactory):
-    class Meta:
-        model = stream_blocks.MultiFileFieldBlock
-
-    @classmethod
-    def make_answer(cls, params=dict()):
-        return [UploadableMediaFactory.make_answer() for _ in range(2)]
+__all__ = ['CustomFormFieldsFactory', 'TitleBlockFactory', 'EmailBlockFactory', 'FullNameBlockFactory', 'ValueFieldBlockFactory']
 
 
 class TitleBlockFactory(FormFieldBlockFactory):
@@ -109,9 +40,14 @@ class FullNameBlockFactory(FormFieldBlockFactory):
         model = blocks.FullNameBlock
 
 
-class RichTextFieldBlockFactory(FormFieldBlockFactory):
+class DurationBlockFactory(FormFieldBlockFactory):
     class Meta:
-        model = blocks.RichTextFieldBlock
+        model = blocks.DurationBlock
+
+    @classmethod
+    def make_answer(cls, params=dict()):
+        choices = list(blocks.DurationBlock.DURATION_OPTIONS.keys())
+        return random.choice(choices)
 
 
 class ValueFieldBlockFactory(FormFieldBlockFactory):
@@ -119,26 +55,45 @@ class ValueFieldBlockFactory(FormFieldBlockFactory):
         model = blocks.ValueBlock
 
     @classmethod
-    def make_answer(cls, params=dict()):
+    def make_answer(cls, params=dict(), form=False):
         return random.randint(0, 1_000_000)
 
 
-class StreamFieldUUIDFactory(wagtail_factories.StreamFieldFactory):
-    def generate(self, *args, **kwargs):
-        blocks = super().generate(*args, **kwargs)
-        ret_val = list()
-        # Convert to JSON so we can add id before create
-        for block_name, value in blocks:
-            block = self.factories[block_name]._meta.model()
-            value = block.get_prep_value(value)
-            ret_val.append({'type': block_name, 'value': value, 'id': str(uuid.uuid4())})
-        return json.dumps(ret_val)
+class AddressFieldBlockFactory(FormFieldBlockFactory):
+    class Meta:
+        model = blocks.AddressFieldBlock
+
+    @classmethod
+    def make_answer(cls, params=dict()):
+        return json.dumps({
+            'country': 'GB',
+            'thoroughfare': factory.Faker('street_name').generate(params),
+            'premise': factory.Faker('building_number').generate(params),
+            'localityname': factory.Faker('city').generate(params),
+            'administrativearea': factory.Faker('city').generate(params),
+            'postalcode': 'SW1 4AQ',
+        })
+
+    @classmethod
+    def make_form_answer(cls, params=dict()):
+        return {
+            'country': 'GB',
+            'thoroughfare': factory.Faker('street_name').generate(params),
+            'premise': factory.Faker('building_number').generate(params),
+            'locality': {
+                'localityname': factory.Faker('city').generate(params),
+                'administrativearea': factory.Faker('city').generate(params),
+                'postal_code': 'SW1 4AQ',
+            }
+        }
 
 
 CustomFormFieldsFactory = StreamFieldUUIDFactory({
+    'duration': DurationBlockFactory,
     'title': TitleBlockFactory,
     'value': ValueFieldBlockFactory,
     'email': EmailBlockFactory,
+    'address': AddressFieldBlockFactory,
     'full_name': FullNameBlockFactory,
     'char': CharFieldBlockFactory,
     'number': NumberFieldBlockFactory,
@@ -147,4 +102,5 @@ CustomFormFieldsFactory = StreamFieldUUIDFactory({
     'image': ImageFieldBlockFactory,
     'file': FileFieldBlockFactory,
     'multi_file': MultiFileFieldBlockFactory,
+    'text_markup': ParagraphBlockFactory,
 })

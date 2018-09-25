@@ -1,7 +1,6 @@
 from wagtail.core import hooks
 from wagtail.contrib.modeladmin.options import ModelAdminGroup, ModelAdmin, modeladmin_register
 
-
 from opentech.public.news.models import NewsType
 from opentech.public.people.models import PersonType
 

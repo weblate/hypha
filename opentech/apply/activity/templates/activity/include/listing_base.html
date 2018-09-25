@@ -1,7 +1,5 @@
+{% load activity_tags %}
 <div class="feed__item feed__item--{{ activity.type }}">
-    {% if activity.private %}
-        <svg class="icon icon--private-eye"><use xlink:href="#private-eye"></use></svg>
-    {% endif %}
     <div class="feed__pre-content">
         <p class="feed__label feed__label--{{ activity.type }}">{{ activity.type|capfirst }}</p>
     </div>
@@ -9,13 +7,31 @@
         <div class="feed__meta">
             <p class="feed__label feed__label--{{ activity.type }} feed__label--mobile">{{ activity.type|capfirst }}</p>
             <p class="feed__meta-item">{{ activity.timestamp|date:"m.d.y h:iA e" }}</p>
-        </div>
-        <div class="feed__heading">
-            <h4 class="feed__name">{{ activity.user }}</h4>
-            {% if submission_title %}
-                <h6>updated <a href="{{ activity.submission.get_absolute_url }}">{{ activity.submission.title }}</a></h6>
+            {% if activity.private %}
+                <p class="feed__meta-item feed__meta-item--right">
+                    <svg class="icon icon--eye"><use xlink:href="#eye"></use></svg>
+                    {{ activity.visibility }}
+                </p>
             {% endif %}
         </div>
-        <p class="feed__teaser">{{ activity.message }}</p>
+        <p class="feed__heading">
+            <span>{{ activity|display_author:request.user }}</span>
+
+            {% if submission_title %}
+                updated <a href="{{ activity.submission.get_absolute_url }}">{{ activity.submission.title }}</a>
+            {% endif %}
+
+            - {{ activity.message }}
+
+            {% if not submission_title and activity|user_can_see_related:request.user %}
+                {% with url=activity.related_object.get_absolute_url %}
+                    {% if url %}
+                    <a href="{{ url }}" class="feed__related-item">
+                        <svg><use xlink:href="#arrow-head-pixels--solid"></use></svg>
+                    </a>
+                    {% endif %}
+                {% endwith %}
+            {% endif %}
+        </p>
     </div>
 </div>

@@ -1,28 +1,29 @@
-{% load static wagtailuserbar wagtailcore_tags wagtailimages_tags navigation_tags util_tags %}<!doctype html>
+{% load static cache wagtailuserbar wagtailcore_tags wagtailimages_tags navigation_tags util_tags %}<!doctype html>
 <html class="no-js" lang="en">
     <head>
         {# TODO fallbacks if page is not defined e.g. for 404 page #}
         <meta charset="utf-8" />
-        <title>{% block title_prefix %}{{ TITLE_PREFIX }}{% endblock %}{% block title %}{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}{% endblock %}{% block title_suffix %}{{ TITLE_SUFFIX }}{% endblock %}</title>
+        <title>{% block title_prefix %}{% if request.site.site_name %}{{ request.site.site_name }} | {% endif %}{% endblock %}{% block title %}{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}{% endblock %}{% block title_suffix %}{{ TITLE_SUFFIX }}{% endblock %}</title>
         <meta name="description" content="{% if page.search_description %}{{ page.search_description }}{% else %}{{ page.listing_summary }}{% endif %}" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-        {% if GOOGLE_TAG_MANAGER_ID %}
-            {# To enable GTM code you need to specify GOOGLE_TAG_MANAGER_ID in production.py or in local.py #}
-            <!-- Google Tag Manager -->
-            <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-            new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-            j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-            'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-            })(window,document,'script','dataLayer','{{ GOOGLE_TAG_MANAGER_ID|escapejs }}');</script>
-            <!-- End Google Tag Manager -->
-        {% endif %}
 
         <!-- favicons -->
         {% comment %}
             Generate favicons by http://realfavicongenerator.net using the following path: settings.STATIC_URL + img/favicons.
             Then favicon.ico should be copied to a directory called "public" in the application root and puppet does some magic to serve it up at the site root.
         {% endcomment %}
+        <link rel="icon" sizes="144x144" href="{% static 'images/favicons/android-chrome-144.png' %}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicons/favicon-16.png' %}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/favicons/favicon-32.png' %}">
+        <link rel="apple-touch-icon" sizes="76x76" href="{% static 'images/favicons/apple-icon-76.png' %}">
+        <link rel="apple-touch-icon" sizes="120x120" href="{% static 'images/favicons/apple-icon-120.png' %}">
+        <link rel="apple-touch-icon" sizes="152x152" href="{% static 'images/favicons/apple-icon-152.png' %}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/favicons/apple-icon-180.png' %}">
+        <link rel="manifest" href="{% static 'images/favicons/site.webmanifest.json' %}">
+        <meta name="msapplication-TileColor" content="#da532c">
+        <meta name="msapplication-TileImage" content="{% static 'images/favicons/mstile-150.png' %}">
+        <meta name="theme-color" content="#ffffff">
+        <link rel="mask-icon" href="{% static 'images/favicons/safari-pinned-tab.svg' %}" color="#5bbad5">
 
         <!-- Twitter summary card - see https://dev.twitter.com/cards/types/summary -->
         <!--  and https://dev.twitter.com/cards/getting-started -->
@@ -58,17 +59,12 @@
     </head>
 
     <body class="{% block body_class %}template-{{ page.get_verbose_name|slugify }}{% endblock %}">
-        {% if GOOGLE_TAG_MANAGER_ID %}
-            {# To enable GTM code you need to specify GOOGLE_TAG_MANAGER_ID in production.py or in local.py #}
-            <!-- Google Tag Manager (noscript) -->
-            <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ GOOGLE_TAG_MANAGER_ID|escapejs }}"
-            height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-            <!-- End Google Tag Manager (noscript) -->
-        {% endif %}
 
         {% include "includes/sprites.html" %}
 
         {% wagtailuserbar %}
+
+        {% include 'includes/messages.html' %}
 
         {% block header %}
             {% image page.header_image fill-2560x410 as header_image %}
@@ -96,7 +92,9 @@
                     </div>
 
                     <section class="header__menus header__menus--desktop">
-                        {% primarynav %}
+                        {% cache 3600 navigation__primary request.site %}
+                            {% primarynav %}
+                        {% endcache %}
 
                         <button class="button button--contains-icons button--left-space js-search-toggle" aria-haspopup="true" aria-label="Toggle desktop search">
                             <svg class="header__icon header__icon--open-search icon"><use xlink:href="#magnifying-glass"></use></svg>
@@ -118,14 +116,13 @@
                                 </button>
                             </div>
                         </div>
-                        {% primarynav %}
+                        {% cache 3600 navigation__primary request.site %}
+                            {% primarynav %}
+                        {% endcache %}
                     </section>
 
                     <div class="header__button-container">
-                        <a href="{% url 'users:login' %}" class="button button--transparent button--contains-icons">
-                            <svg class="icon icon--person"><use xlink:href="#person-icon"></use></svg>
-                            My OTF
-                        </a>
+                        {% include "utils/includes/login_button.html" %}
                         <div class="button button--google-translate" id="google_translate_element"></div>
                     </div>
                 </div>
@@ -157,34 +154,7 @@
         <footer class="footer">
             <div class="grid grid--two wrapper wrapper--large">
                 <div class="footer__inner">
-                    <h4>Get the latest internet freedom news</h4>
-                    <form class="form">
-                        <div>
-                            <div class="mailchimp-signup-subscribe-form-description"></div>
-                            <div id="mailchimp-newsletter-32632431e3-mergefields" class="mailchimp-newsletter-mergefields">
-                                <div class="form-item form-type-textfield form-item-mergevars-EMAIL">
-                                    <label for="edit-mergevars-email">Email Address <span class="form-required" title="This field is required.">*</span></label>
-                                    <input type="text" id="edit-mergevars-email" name="mergevars[EMAIL]" value="" size="25" maxlength="128" class="form-text required input--secondary">
-                                </div>
-
-                                <div class="form-item form-type-textfield form-item-mergevars-FNAME">
-                                    <label for="edit-mergevars-fname">First Name </label>
-                                    <input type="text" id="edit-mergevars-fname" name="mergevars[FNAME]" value="" size="25" maxlength="128" class="form-text input--secondary">
-                                </div>
-
-                                <div class="form-item form-type-textfield form-item-mergevars-LNAME">
-                                    <label for="edit-mergevars-lname">Last Name </label>
-                                    <input type="text" id="edit-mergevars-lname" name="mergevars[LNAME]" value="" size="25" maxlength="128" class="form-text input--secondary">
-                                </div>
-
-                            </div>
-                            <input type="hidden" name="form_build_id" value="form-2Dy9x5istHLUmufjcHabtyuZ_niL-RlfSoHBIq39hpI">
-                            <input type="hidden" name="form_id" value="mailchimp_signup_subscribe_block_otf_newsletter_form">
-                            <div class="form-actions form-wrapper" id="edit-actions--3">
-                                <input type="submit" id="edit-submit--3" name="op" value="Sign up" class="form-submit link link--button-transparent link--footer-signup">
-                            </div>
-                        </div>
-                    </form>
+                    {% include "mailchimp/newsletter_signup.html" %}
                 </div>
 
                 <div class="footer__inner">
@@ -203,12 +173,10 @@
                         <p>
                             <a href="mailto:hello@opentech.fund">hello@opentech.fund</a></br>
                             <a href="mailto:press@opentech.fund">press@opentech.fund</a></br>
-                            <span>PGP: 67AC DDCF B909 4685 36DD BC03 F766 3861 965A 90D2</span>
+                            <span>PGP: <a href="https://keybase.io/opentechfund/pgp_keys.asc?fingerprint=67acddcfb909468536ddbc03f7663861965a90d2">67AC DDCF B909 4685 36DD BC03 F766 3861 965A 90D2</a></span>
                         </p>
 
-                        <p><a href="/rss.xml">RSS Feed</a></p>
-
-                        <p><a class="link link--underlined" href="#">Terms of Use</a></p>
+                        <p><a class="link link--underlined" href="/about/tos/">Terms of Use</a></p>
 
                         <p>Test the OTF website for censorship</p>
 
@@ -219,18 +187,10 @@
                                 <svg class="icon icon--footer-credit"><use xlink:href="#bbg-logo"></use></svg>
                             </a>
 
-                            <a href="http://www.rfa.org/english/" aria-label="Link to the Radio Free Asia website">
+                            <a href="https://www.rfa.org/english/" aria-label="Link to the Radio Free Asia website">
                                 <img src="{% static 'images/radio-free-asia-logo.svg' %}" alt="logo fo radio free asia">
                             </a>
                         </div>
-
-                    <section>
-                        {% footernav %}
-                    </section>
-
-                    <section>
-                        {% footerlinks %}
-                    </section>
                 </div>
             </div>
 
@@ -239,7 +199,7 @@
         <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
         <script type="text/javascript">
             function googleTranslateElementInit() {
-              new google.translate.TranslateElement({pageLanguage: 'en', layout: google.translate.TranslateElement.InlineLayout.SIMPLE}, 'google_translate_element');
+              new google.translate.TranslateElement({pageLanguage: 'en', layout: google.translate.TranslateElement.InlineLayout.SIMPLE, autoDisplay: false}, 'google_translate_element');
             }
         </script>
         {% block extra_js %}{% endblock %}

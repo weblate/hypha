@@ -3,8 +3,13 @@
 {% block title %}{{ object.title }}{% endblock %}
 {% block body_class %}{% endblock %}
 {% block content %}
-<div class="wrapper wrapper--breakout wrapper--admin">
-    <div class="wrapper wrapper--medium">
+{% if object.round.specific.is_sealed %}
+<ul class="messages">
+    {% include "includes/message_item.html" with message="This submission is sealed " tag="warning" close=False %}
+</ul>
+{% endif %}
+<div class="admin-bar">
+    <div class="admin-bar__inner">
         <h1 class="beta heading heading--no-margin heading--bold">{{ object.title }}</h1>
         <h5 class="heading heading--meta">
             <span>{{ object.stage }}</span>
@@ -27,12 +32,17 @@
                 <a class="tab__item" href="#activity-feed" data-tab="tab-3">
                     Activity Feed
                 </a>
+                {% if request.user.is_superuser %}
+                <a class="tab__item tab__item--right js-tabs-off" href="{% url 'admin:activity_event_changelist' %}?submission__id={{ object.id }}">
+                    View message log
+                </a>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
 
-<div class="wrapper wrapper--medium wrapper--tabs">
+<div class="wrapper wrapper--large wrapper--tabs">
 {# Tab 1 #}
     <div class="tabs__content" id="tab-1">
         {% block admin_actions %}
@@ -48,8 +58,8 @@
                 <div>
                     <h6 class="heading heading--submission-meta">
                         <span>Submitted: <strong>{{ object.submit_time.date }} by {{ object.user.get_full_name }}</strong></span>
-                        <span>Last edited: <strong>{{ object.last_edit.timestamp.date }} by {{ object.last_edit.user.get_full_name }}</strong></span>
-                        {% if request.user|has_edit_perm:object and object.user == request.user %}
+                        <span>Last edited: <strong>{{ object.live_revision.timestamp.date }} by {{ object.live_revision.author }}</strong></span>
+                        {% if request.user|has_edit_perm:object %}
                             <a class="link link--edit-submission is-active" href="{% url 'funds:submissions:edit' object.id %}">
                                 Edit
                                 <svg class="icon icon--pen"><use xlink:href="#pen"></use></svg>
@@ -73,13 +83,13 @@
                 {% endif %}
 
                 {% block determination %}
-                    {% include 'determinations/includes/determination_block.html' with submission=object %}
+                    {% include 'determinations/includes/applicant_determination_block.html' with submission=object %}
                 {% endblock %}
 
                 {% block reviews %}
                 {% endblock %}
 
-                {% if other_submissions or object.previous %}
+                {% if other_submissions or object.previous or object.next %}
                     <div class="sidebar__inner">
                         {% if object.previous %}
                             <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.previous.id %}">View linked {{ object.previous.stage }}</a></h6>

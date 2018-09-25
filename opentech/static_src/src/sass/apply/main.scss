@@ -13,10 +13,12 @@
 
 // Components
 @import 'components/all-submissions';
+@import 'components/admin-bar';
 @import 'components/activity-feed';
 @import 'components/comment';
 @import 'components/button';
 @import 'components/feed';
+@import 'components/filters';
 @import 'components/grid';
 @import 'components/heading';
 @import 'components/icon';
@@ -34,6 +36,7 @@
 @import 'components/input';
 @import 'components/nav';
 @import 'components/pagination';
+@import 'components/profile';
 @import 'components/reviews-list';
 @import 'components/reviews-summary';
 @import 'components/reviews-sidebar';
@@ -44,6 +47,7 @@
 @import 'components/traffic-light';
 @import 'components/wrapper';
 @import 'components/revisions';
+@import 'components/messages';
 
 // Layout
 @import 'layout/header';

@@ -96,7 +96,14 @@
     }
 
     &__image {
+        width: 180px;
+        height: 180px;
         margin-bottom: 10px;
+
+        > img {
+            min-height: 100%;
+            width: auto;
+        }
 
         @include media-query(tablet-portrait) {
             position: absolute;
@@ -108,8 +115,6 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 180px;
-            height: 180px;
             background-color: $color--light-blue;
 
             > svg {

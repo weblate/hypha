@@ -79,33 +79,60 @@ class Stage:
         return self.name
 
 
-class Permission:
+class BasePermissions:
     def can_edit(self, user: 'User') -> bool:
+        if user.is_apply_staff:
+            return self.can_staff_edit(user)
+
+        if user.is_applicant:
+            return self.can_applicant_edit(user)
+
+    def can_staff_edit(self, user: 'User') -> bool:
         return False
 
-    def can_staff_review(self, user: 'User') -> bool:
-        return False
-
-    def can_reviewer_review(self, user: 'User') -> bool:
+    def can_applicant_edit(self, user: 'User') -> bool:
         return False
 
     def can_review(self, user: 'User') -> bool:
-        return self.can_staff_review(user) or self.can_reviewer_review(user)
+        if user.is_apply_staff:
+            return self.can_staff_review(user)
 
+        if user.is_reviewer:
+            return self.can_reviewer_review(user)
 
-class StaffReviewPermission(Permission):
     def can_staff_review(self, user: 'User') -> bool:
-        return user.is_apply_staff
+        return False
 
-
-class ReviewerReviewPermission(Permission):
     def can_reviewer_review(self, user: 'User') -> bool:
-        return user.is_reviewer
+        return False
 
 
-class CanEditPermission(Permission):
-    def can_edit(self, user: 'User') -> bool:
+class NoPermissions(BasePermissions):
+    pass
+
+
+class DefaultPermissions(BasePermissions):
+    # Other Permissions should inherit from this class
+    # Staff can review at any time
+    def can_staff_review(self, user: 'User') -> bool:
         return True
+
+    def can_staff_edit(self, user: 'User') -> bool:
+        return True
+
+
+class ReviewerReviewPermissions(DefaultPermissions):
+    def can_reviewer_review(self, user: 'User') -> bool:
+        return True
+
+
+class CanEditPermissions(DefaultPermissions):
+    def can_applicant_edit(self, user: 'User') -> bool:
+        return True
+
+    def can_staff_edit(self, user: 'User') -> bool:
+        # Prevent staff editing whilst with the user for edits
+        return False
 
 
 Request = Stage('Request', False)
@@ -126,16 +153,20 @@ SingleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Request,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 0,
     },
     'more_info': {
         'transitions': {
-            INITIAL_STATE: {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            INITIAL_STATE: {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Request,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 0,
     },
     'internal_review': {
@@ -144,7 +175,7 @@ SingleStageDefinition = {
         },
         'display': 'Internal Review',
         'stage': Request,
-        'permissions': StaffReviewPermission(),
+        'permissions': DefaultPermissions(),
         'step': 1,
     },
     'post_review_discussion': {
@@ -155,29 +186,33 @@ SingleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Request,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 2,
     },
     'post_review_more_info': {
         'transitions': {
-            'post_review_discussion': {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            'post_review_discussion': {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Request,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 2,
     },
 
     'accepted': {
         'display': 'Accepted',
         'stage': Request,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 3,
     },
     'rejected': {
         'display': 'Rejected',
         'stage': Request,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 3,
     },
 }
@@ -192,16 +227,20 @@ DoubleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Concept,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 0,
     },
     'concept_more_info': {
         'transitions': {
-            INITIAL_STATE: {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            INITIAL_STATE: {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Concept,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 0,
     },
     'concept_internal_review': {
@@ -210,7 +249,7 @@ DoubleStageDefinition = {
         },
         'display': 'Internal Review',
         'stage': Concept,
-        'permissions': StaffReviewPermission(),
+        'permissions': DefaultPermissions(),
         'step': 1,
     },
     'concept_review_discussion': {
@@ -221,16 +260,20 @@ DoubleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Concept,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 2,
     },
     'concept_review_more_info': {
         'transitions': {
-            'concept_review_discussion': {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            'concept_review_discussion': {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Concept,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 2,
     },
     'invited_to_proposal': {
@@ -244,13 +287,13 @@ DoubleStageDefinition = {
             },
         },
         'stage': Concept,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 3,
     },
     'concept_rejected': {
         'display': 'Rejected',
         'stage': Concept,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 3,
     },
     'draft_proposal': {
@@ -259,7 +302,7 @@ DoubleStageDefinition = {
         },
         'display': 'Invited for Proposal',
         'stage': Proposal,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 4,
     },
     'proposal_discussion': {
@@ -270,16 +313,20 @@ DoubleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Proposal,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 5,
     },
     'proposal_more_info': {
         'transitions': {
-            'proposal_discussion': {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            'proposal_discussion': {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Proposal,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 5,
     },
     'proposal_internal_review': {
@@ -288,7 +335,7 @@ DoubleStageDefinition = {
         },
         'display': 'Internal Review',
         'stage': Proposal,
-        'permissions': StaffReviewPermission(),
+        'permissions': DefaultPermissions(),
         'step': 6,
     },
     'post_proposal_review_discussion': {
@@ -299,16 +346,20 @@ DoubleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Proposal,
-        'permissions': ReviewerReviewPermission(),
+        'permissions': DefaultPermissions(),
         'step': 7,
     },
     'post_proposal_review_more_info': {
         'transitions': {
-            'post_proposal_review_discussion': {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            'post_proposal_review_discussion': {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Proposal,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 7,
     },
     'external_review': {
@@ -317,7 +368,7 @@ DoubleStageDefinition = {
         },
         'display': 'Advisory Council Review',
         'stage': Proposal,
-        'permissions': Permission(),
+        'permissions': ReviewerReviewPermissions(),
         'step': 8,
     },
     'post_external_review_discussion': {
@@ -328,28 +379,32 @@ DoubleStageDefinition = {
         },
         'display': 'Under Discussion',
         'stage': Proposal,
-        'permissions': Permission(),
+        'permissions': DefaultPermissions(),
         'step': 9,
     },
     'post_external_review_more_info': {
         'transitions': {
-            'post_external_review_discussion': {'display': 'Submit', 'permissions': {UserPermissions.APPLICANT}, 'method': 'create_revision'},
+            'post_external_review_discussion': {
+                'display': 'Submit',
+                'permissions': {UserPermissions.APPLICANT, UserPermissions.LEAD, UserPermissions.ADMIN},
+                'method': 'create_revision',
+            },
         },
         'display': 'More information required',
         'stage': Proposal,
-        'permissions': CanEditPermission(),
+        'permissions': CanEditPermissions(),
         'step': 9,
     },
     'proposal_accepted': {
         'display': 'Accepted',
         'stage': Proposal,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 10,
     },
     'proposal_rejected': {
         'display': 'Rejected',
         'stage': Proposal,
-        'permissions': Permission(),
+        'permissions': NoPermissions(),
         'step': 10,
     },
 
@@ -377,6 +432,21 @@ WORKFLOWS = {
 PHASES = list(itertools.chain.from_iterable(workflow.items() for workflow in WORKFLOWS.values()))
 
 
+def get_stage_change_actions():
+    changes = set()
+    for workflow in WORKFLOWS.values():
+        stage = None
+        for phase in workflow.values():
+            if phase.stage != stage and stage:
+                changes.add(phase.name)
+            stage = phase.stage
+
+    return changes
+
+
+STAGE_CHANGE_ACTIONS = get_stage_change_actions()
+
+
 STATUSES = defaultdict(set)
 
 for key, value in PHASES:
@@ -392,7 +462,7 @@ def get_review_statuses(user=None):
     reviews = set()
 
     for phase_name, phase in PHASES:
-        if 'review' in phase_name:
+        if 'review' in phase_name and 'discussion' not in phase_name:
             if user is None:
                 reviews.add(phase_name)
             elif phase.permissions.can_review(user):
@@ -411,20 +481,19 @@ DETERMINATION_RESPONSE_PHASES = [
 
 
 def get_determination_transitions():
-    transitions = set()
-
+    transitions = {}
     for phase_name, phase in PHASES:
         for transition_name in phase.transitions:
             if 'accepted' in transition_name:
-                transitions.add(transition_name)
+                transitions[transition_name] = 'accepted'
             elif 'rejected' in transition_name:
-                transitions.add(transition_name)
+                transitions[transition_name] = 'rejected'
             elif 'more_info' in transition_name:
-                transitions.add(transition_name)
+                transitions[transition_name] = 'more_info'
             elif 'invited_to_proposal' in transition_name:
-                transitions.add(transition_name)
+                transitions[transition_name] = 'accepted'
 
     return transitions
 
 
-DETERMINATION_RESPONSE_TRANSITIONS = get_determination_transitions()
+DETERMINATION_OUTCOMES = get_determination_transitions()

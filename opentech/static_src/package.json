@@ -72,8 +72,7 @@
     "build:prod": "npm-run-all clean create_dirs sync compile:*:prod",
     "deploy": "npm-run-all clean create_dirs build:prod upload",
     "start": "npm-run-all clean create_dirs sync compile:*:dev -p compile:*:watch watch serve --silent",
-    "debug": "npm-run-all clean create_dirs sync compile:*:prod -p compile:*:debug watch:*:debug --silent",
-    "postinstall": "npm run build"
+    "debug": "npm-run-all clean create_dirs sync compile:*:prod -p compile:*:debug watch:*:debug --silent"
   },
   "devDependencies": {
     "autoprefixer": "^8.1.0",
@@ -95,10 +94,10 @@
     "rollup-plugin-sizes": "^0.2.3",
     "rollup-plugin-uglify": "^1.0.1",
     "rollup-watch": "^3.2.2",
-    "sass-lint": "^1.8.2"
+    "sass-lint": "^1.12.1"
   },
   "engines": {
-    "node": ">=4"
+    "node": "8.12.0"
   },
   "dependencies": {
     "@fancyapps/fancybox": "^3.2.5"

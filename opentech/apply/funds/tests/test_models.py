@@ -7,12 +7,12 @@ from django.contrib.auth.models import AnonymousUser
 from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
-from django.test import RequestFactory, TestCase
-
-from wagtail.core.models import Site
+from django.test import TestCase, override_settings
 
 from opentech.apply.funds.models import ApplicationSubmission
+from opentech.apply.funds.blocks import EmailBlock, FullNameBlock
 from opentech.apply.funds.workflow import Request
+from opentech.apply.utils.testing import make_request
 
 from .factories import (
     ApplicationSubmissionFactory,
@@ -39,11 +39,11 @@ class TestFundModel(TestCase):
         self.assertIsNone(self.fund.open_round)
 
     def test_open_ended_round(self):
-        open_round = RoundFactory(end_date=None, parent=self.fund)
+        open_round = RoundFactory(start_date=date.today(), end_date=None, parent=self.fund)
         self.assertEqual(self.fund.open_round, open_round)
 
     def test_normal_round(self):
-        open_round = RoundFactory(parent=self.fund)
+        open_round = RoundFactory(parent=self.fund, now=True)
         self.assertEqual(self.fund.open_round, open_round)
 
     def test_closed_round(self):
@@ -58,7 +58,7 @@ class TestFundModel(TestCase):
         self.assertIsNone(self.fund.open_round)
 
     def test_multiple_open_rounds(self):
-        open_round = RoundFactory(parent=self.fund)
+        open_round = RoundFactory(parent=self.fund, now=True)
         next_round_start = open_round.end_date + timedelta(days=1)
         RoundFactory(start_date=next_round_start, end_date=None, parent=self.fund)
         self.assertEqual(self.fund.open_round, open_round)
@@ -138,7 +138,7 @@ class TestRoundModelDates(TestCase):
         new_round = RoundFactory.build(start_date=overlapping_start, end_date=None)
 
         # we add on the parent page which gets included from a pre_create_hook
-        new_round.parent_page = self.fund
+        new_round.parent_page = {new_round.__class__: {new_round.title: self.fund}}
 
         with self.assertRaises(ValidationError):
             new_round.clean()
@@ -148,10 +148,12 @@ class TestRoundModelWorkflowAndForms(TestCase):
     def setUp(self):
         self.fund = FundTypeFactory(parent=None)
 
-        self.round = RoundFactory.build()
-        self.round.parent_page = self.fund
-        self.round.lead = RoundFactory.lead.get_factory()(**RoundFactory.lead.defaults)
+        # Must create lead, adding child complains about "built" user with no id
+        lead = RoundFactory.lead.get_factory()(**RoundFactory.lead.defaults)
+        self.round = RoundFactory.build(lead=lead, parent=None)
 
+        # Assign parent_page like the init does
+        self.round.parent_page = {self.round.__class__: {self.round.title: self.fund}}
         self.fund.add_child(instance=self.round)
 
     def test_workflow_is_copied_to_new_rounds(self):
@@ -169,50 +171,52 @@ class TestRoundModelWorkflowAndForms(TestCase):
         del self.round.parent_page
         form = self.round.forms.first().form
         # Not ideal, would prefer better way to create the stream values
-        new_field = CustomFormFieldsFactory.generate(None, {'0__email__': ''})
+        new_field = CustomFormFieldsFactory.generate(None, {})
         form.form_fields = new_field
         form.save()
         for round_form, fund_form in itertools.zip_longest(self.round.forms.all(), self.fund.forms.all()):
             self.assertNotEqual(round_form, fund_form)
 
 
+@override_settings(ROOT_URLCONF='opentech.apply.urls')
 class TestFormSubmission(TestCase):
     def setUp(self):
-        self.site = Site.objects.first()
         self.User = get_user_model()
 
         self.email = 'test@test.com'
         self.name = 'My Name'
 
-        self.request_factory = RequestFactory()
         fund = FundTypeFactory()
 
-        self.site.root_page = fund
-        self.site.save()
+        self.site = fund.get_site()
 
-        self.round_page = RoundFactory(parent=fund)
+        self.round_page = RoundFactory(parent=fund, now=True)
         self.lab_page = LabFactory(lead=self.round_page.lead)
 
-    def submit_form(self, page=None, email=None, name=None, user=AnonymousUser()):
-        if email is None:
-            email = self.email
-        if name is None:
-            name = self.name
-
+    def submit_form(self, page=None, email=None, name=None, user=AnonymousUser(), ignore_errors=False):
         page = page or self.round_page
-        fields = page.get_form_fields()
-        data = {k: v for k, v in zip(fields, ['project', 0, email, name])}
 
-        request = self.request_factory.post('', data)
-        request.user = user
-        request.site = self.site
+        fields = page.forms.first().fields
+        data = CustomFormFieldsFactory.form_response(fields)
 
-        try:
+        # Add our own data
+        for field in page.forms.first().fields:
+            if isinstance(field.block, EmailBlock):
+                data[field.id] = self.email if email is None else email
+            if isinstance(field.block, FullNameBlock):
+                data[field.id] = self.name if name is None else name
+
+        request = make_request(user, data, method='post', site=self.site)
+
+        if page.get_parent().id != self.site.root_page.id:
+            # Its a fund
             response = page.get_parent().serve(request)
-        except AttributeError:
+        else:
             response = page.serve(request)
 
-        self.assertNotContains(response, 'There where some errors with your form')
+        if not ignore_errors:
+            # Check the data we submit is correct
+            self.assertNotContains(response, 'errors')
         return response
 
     def test_workflow_and_status_assigned(self):
@@ -286,7 +290,7 @@ class TestFormSubmission(TestCase):
         # Lead + applicant
         self.assertEqual(self.User.objects.count(), 2)
 
-        response = self.submit_form(email='', name='', user=user)
+        response = self.submit_form(email='', name='', user=user, ignore_errors=True)
         self.assertContains(response, 'This field is required')
 
         # Lead + applicant
@@ -294,12 +298,14 @@ class TestFormSubmission(TestCase):
 
         self.assertEqual(ApplicationSubmission.objects.count(), 0)
 
+    @override_settings(SEND_MESSAGES=True)
     def test_email_sent_to_user_on_submission_fund(self):
         self.submit_form()
         # "Thank you for your submission" and "Account Creation"
         self.assertEqual(len(mail.outbox), 2)
         self.assertEqual(mail.outbox[0].to[0], self.email)
 
+    @override_settings(SEND_MESSAGES=True)
     def test_email_sent_to_user_on_submission_lab(self):
         self.submit_form(page=self.lab_page)
         # "Thank you for your submission" and "Account Creation"
@@ -325,7 +331,7 @@ class TestApplicationSubmission(TestCase):
         submission_b = self.make_submission(round=submission_a.round)
         submissions = [submission_a, submission_b]
         self.assertEqual(
-            list(ApplicationSubmission.objects.order_by('email')),
+            list(ApplicationSubmission.objects.order_by('id')),
             submissions,
         )
 
@@ -334,7 +340,7 @@ class TestApplicationSubmission(TestCase):
         submission_b = self.make_submission(round=submission_a.round)
         submissions = [submission_b, submission_a]
         self.assertEqual(
-            list(ApplicationSubmission.objects.order_by('-email')),
+            list(ApplicationSubmission.objects.order_by('-id')),
             submissions,
         )
 
@@ -365,18 +371,28 @@ class TestApplicationSubmission(TestCase):
     def test_file_gets_uploaded(self):
         filename = 'file_name.png'
         submission = self.make_submission(form_data__image__filename=filename)
-        save_path = os.path.join(settings.MEDIA_ROOT, submission.save_path(filename))
-        self.assertTrue(os.path.isfile(save_path))
+        path = os.path.join(settings.MEDIA_ROOT, 'submission', str(submission.id))
+
+        # Check we created the top level folder
+        self.assertTrue(os.path.isdir(path))
+
+        found_files = []
+        for _, _, files in os.walk(path):
+            found_files.extend(files)
+
+        # Check we saved the file somewhere beneath it
+        self.assertIn(filename, found_files)
 
     def test_create_revision_on_create(self):
         submission = ApplicationSubmissionFactory()
         self.assertEqual(submission.revisions.count(), 1)
         self.assertDictEqual(submission.live_revision.form_data, submission.form_data)
+        self.assertEqual(submission.live_revision.author, submission.user)
 
     def test_create_revision_on_data_change(self):
         submission = ApplicationSubmissionFactory()
-        new_data = {'title': 'My Awesome Title'}
-        submission.form_data = new_data
+        submission.form_data['title'] = 'My Awesome Title'
+        new_data = submission.form_data
         submission.create_revision()
         submission = self.refresh(submission)
         self.assertEqual(submission.revisions.count(), 2)
@@ -391,7 +407,7 @@ class TestApplicationSubmission(TestCase):
     def test_can_get_draft_data(self):
         submission = ApplicationSubmissionFactory()
         title = 'My new title'
-        submission.form_data = {'title': title}
+        submission.form_data['title'] = title
         submission.create_revision(draft=True)
         self.assertEqual(submission.revisions.count(), 2)
 
@@ -409,11 +425,37 @@ class TestApplicationSubmission(TestCase):
     def test_draft_updated(self):
         submission = ApplicationSubmissionFactory()
         title = 'My new title'
-        submission.form_data = {'title': title}
+        submission.form_data['title'] = title
         submission.create_revision(draft=True)
         self.assertEqual(submission.revisions.count(), 2)
 
         title = 'My even newer title'
-        submission.form_data = {'title': title}
+        submission.form_data['title'] = title
+
         submission.create_revision(draft=True)
         self.assertEqual(submission.revisions.count(), 2)
+
+
+class TestSubmissionRenderMethods(TestCase):
+    def test_must_include_not_included_in_answers(self):
+        submission = ApplicationSubmissionFactory()
+        answers = submission.render_answers()
+        for name in submission.must_include:
+            field = submission.field(name)
+            self.assertNotIn(field.value['field_label'], answers)
+
+    def test_normal_answers_included_in_answers(self):
+        submission = ApplicationSubmissionFactory()
+        answers = submission.output_answers()
+        for field_name in submission.question_field_ids:
+            if field_name not in submission.must_include:
+                field = submission.field(field_name)
+                self.assertIn(field.value['field_label'], answers)
+
+    def test_paragraph_not_rendered_in_answers(self):
+        rich_text_label = 'My rich text label!'
+        submission = ApplicationSubmissionFactory(
+            form_fields__text_markup__value=rich_text_label
+        )
+        answers = submission.render_answers()
+        self.assertNotIn(rich_text_label, answers)

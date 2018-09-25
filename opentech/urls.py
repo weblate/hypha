@@ -11,7 +11,7 @@ from wagtail.core import urls as wagtail_urls
 from wagtail.documents import urls as wagtaildocs_urls
 
 from opentech.public import urls as public_urls
-from opentech.apply import urls as apply_urls
+from opentech.apply.users.urls import public_urlpatterns as user_urls
 
 
 urlpatterns = [
@@ -21,7 +21,7 @@ urlpatterns = [
     path('documents/', include(wagtaildocs_urls)),
     path('sitemap.xml', sitemap),
     path('', include(public_urls)),
-    path('', include(apply_urls)),
+    path('', include((user_urls, 'users_public'))),
     path('', include('social_django.urls', namespace='social')),
     path('tinymce/', include('tinymce.urls')),
     path('select2/', include('django_select2.urls')),
@@ -61,3 +61,9 @@ if cache_length:
         urlpatterns,
         cache_control(max_age=cache_length)
     )
+
+if settings.DEBUG and settings.DEBUGTOOLBAR:
+    import debug_toolbar
+    urlpatterns = [
+        path('__debug__/', include(debug_toolbar.urls)),
+    ] + urlpatterns

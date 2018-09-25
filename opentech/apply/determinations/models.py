@@ -2,8 +2,6 @@ import bleach
 from django.conf import settings
 from django.contrib.postgres.fields import JSONField
 from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
 from django.urls import reverse
 from django.utils.translation import ugettext_lazy as _
 from wagtail.admin.edit_handlers import TabbedInterface, ObjectList, FieldPanel
@@ -11,7 +9,8 @@ from wagtail.contrib.settings.models import BaseSetting
 from wagtail.contrib.settings.registry import register_setting
 from wagtail.core.fields import RichTextField
 
-from opentech.apply.activity.models import Activity
+from opentech.apply.funds.workflow import DETERMINATION_OUTCOMES
+
 
 REJECTED = 0
 NEEDS_MORE_INFO = 1
@@ -23,18 +22,35 @@ DETERMINATION_CHOICES = (
     (ACCEPTED, _('Approved')),
 )
 
-DETERMINATION_TRANSITION_SUFFIX = {
-    ACCEPTED: ['accepted', 'invited_to_proposal'],
-    REJECTED: ['rejected'],
-    NEEDS_MORE_INFO: ['more_info'],
+DETRMINATION_TO_OUTCOME = {
+    'rejected': REJECTED,
+    'accepted': ACCEPTED,
+    'more_info': NEEDS_MORE_INFO,
+}
+
+TRANSITION_DETERMINATION = {
+    name: DETRMINATION_TO_OUTCOME[type]
+    for name, type in DETERMINATION_OUTCOMES.items()
 }
 
 
+class DeterminationQuerySet(models.QuerySet):
+    def active(self):
+        # Designed to be used with a queryset related to submissions
+        return self.get(is_draft=True)
+
+    def submitted(self):
+        return self.filter(is_draft=False)
+
+    def final(self):
+        return self.submitted().filter(outcome__in=[ACCEPTED, REJECTED])
+
+
 class Determination(models.Model):
-    submission = models.OneToOneField(
+    submission = models.ForeignKey(
         'funds.ApplicationSubmission',
         on_delete=models.CASCADE,
-        related_name='determination'
+        related_name='determinations'
     )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -48,12 +64,25 @@ class Determination(models.Model):
     created_at = models.DateTimeField(verbose_name=_('Creation time'), auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name=_('Update time'), auto_now=True)
 
+    # Meta: used for migration purposes only
+    drupal_id = models.IntegerField(null=True, blank=True, editable=False)
+
+    objects = DeterminationQuerySet.as_manager()
+
+    @property
+    def stripped_message(self):
+        return bleach.clean(self.message, tags=[], strip=True)
+
+    @property
+    def clean_outcome(self):
+        return self.get_outcome_display()
+
     def get_absolute_url(self):
-        return reverse('apply:submissions:determinations:detail', args=(self.id,))
+        return reverse('apply:submissions:determinations:detail', args=(self.submission.id, self.id))
 
     @property
     def submitted(self):
-        return self.outcome != NEEDS_MORE_INFO and not self.is_draft
+        return not self.is_draft
 
     def __str__(self):
         return f'Determination for {self.submission.title} by {self.author!s}'
@@ -61,27 +90,10 @@ class Determination(models.Model):
     def __repr__(self):
         return f'<{self.__class__.__name__}: {str(self.data)}>'
 
-
-@receiver(post_save, sender=Determination)
-def log_determination_activity(sender, **kwargs):
-    determination = kwargs.get('instance')
-
-    if kwargs.get('created', False):
-        Activity.actions.create(
-            user=determination.author,
-            submission=determination.submission,
-            message=f'Created a determination for {determination.submission.title}'
-        )
-
-    if not kwargs.get('is_draft', False):
-        submission = determination.submission
-        message = bleach.clean(determination.message, tags=[], strip=True)
-        outcome = determination.get_outcome_display()
-        Activity.actions.create(
-            user=determination.author,
-            submission=submission,
-            message=f"Sent a {outcome} determination for {submission.title}:\r\n{message}"
-        )
+    @property
+    def detailed_data(self):
+        from .views import get_form_for_stage
+        return get_form_for_stage(self.submission).get_detailed_response(self.data)
 
 
 @register_setting

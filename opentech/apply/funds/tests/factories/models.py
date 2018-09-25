@@ -1,92 +1,117 @@
-from collections import defaultdict
 import datetime
-import json
 
 import factory
 import wagtail_factories
 
 from opentech.apply.funds.models import (
-    AbstractRelatedForm,
-    ApplicationForm,
     ApplicationSubmission,
     ApplicationRevision,
     FundType,
-    FundForm,
-    LabForm,
     LabType,
+    RequestForPartners,
     Round,
-    RoundForm,
+    SealedRound,
+)
+from opentech.apply.funds.models.forms import (
+    ApplicationForm,
+    ApplicationBaseForm,
+    ApplicationBaseReviewForm,
+    LabBaseForm,
+    LabBaseReviewForm,
+    RoundBaseForm,
+    RoundBaseReviewForm,
 )
 from opentech.apply.users.tests.factories import StaffFactory, UserFactory
+from opentech.apply.stream_forms.testing.factories import FormDataFactory
+from opentech.apply.home.factories import ApplyHomePageFactory
 
 from . import blocks
 
 
 __all__ = [
     'FundTypeFactory',
-    'FundFormFactory',
+    'ApplicationBaseFormFactory',
     'ApplicationFormFactory',
     'ApplicationRevisionFactory',
     'ApplicationSubmissionFactory',
+    'InvitedToProposalFactory',
     'RoundFactory',
-    'RoundFormFactory',
+    'RoundBaseFormFactory',
     'LabFactory',
-    'LabFormFactory',
+    'LabBaseFormFactory',
+    'LabSubmissionFactory',
+    'SealedRoundFactory',
+    'SealedSubmissionFactory',
+    'workflow_for_stages',
 ]
 
 
-def build_form(data, prefix=''):
-    if prefix:
-        prefix += '__'
-
-    extras = defaultdict(dict)
-    for key, value in data.items():
-        if 'form_fields' in key:
-            _, field, attr = key.split('__')
-            extras[field][attr] = value
-
-    form_fields = {}
-    for i, field in enumerate(blocks.CustomFormFieldsFactory.factories):
-        form_fields[f'{prefix}form_fields__{i}__{field}__'] = ''
-        for attr, value in extras[field].items():
-            form_fields[f'{prefix}form_fields__{i}__{field}__{attr}'] = value
-
-    return form_fields
+def workflow_for_stages(stages):
+    return list(FundType.WORKFLOW_CHOICES.keys())[stages - 1]
 
 
-class FundTypeFactory(wagtail_factories.PageFactory):
+class AbstractApplicationFactory(wagtail_factories.PageFactory):
     class Meta:
-        model = FundType
+        abstract = True
 
     class Params:
         workflow_stages = 1
 
+    title = factory.Faker('sentence')
+
     # Will need to update how the stages are identified as Fund Page changes
-    workflow_name = factory.LazyAttribute(lambda o: list(FundType.WORKFLOW_CHOICES.keys())[o.workflow_stages - 1])
+    workflow_name = factory.LazyAttribute(lambda o: workflow_for_stages(o.workflow_stages))
+
+    @factory.post_generation
+    def parent(self, create, extracted_parent, **parent_kwargs):
+        # THIS MUST BE THE FIRST POST GENERATION METHOD OR THE OBJECT WILL BE UNSAVED
+        if create:
+            if extracted_parent and parent_kwargs:
+                raise ValueError('Cant pass a parent instance and attributes')
+
+            if not extracted_parent:
+                parent = ApplyHomePageFactory(**parent_kwargs)
+            else:
+                # Assume root node if no parent passed
+                parent = extracted_parent
+
+            parent.add_child(instance=self)
 
     @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            fields = build_form(kwargs, prefix='form')
             for _ in self.workflow.stages:
                 # Generate a form based on all defined fields on the model
-                FundFormFactory(
-                    fund=self,
-                    **fields,
+                ApplicationBaseFormFactory(
+                    application=self,
+                    **kwargs,
                 )
+                ApplicationBaseReviewForm(
+                    application=self,
+                    **kwargs,
+                )
+
+
+class FundTypeFactory(AbstractApplicationFactory):
+    class Meta:
+        model = FundType
+
+
+class RequestForPartnersFactory(AbstractApplicationFactory):
+    class Meta:
+        model = RequestForPartners
 
 
 class AbstractRelatedFormFactory(factory.DjangoModelFactory):
     class Meta:
-        model = AbstractRelatedForm
         abstract = True
     form = factory.SubFactory('opentech.apply.funds.tests.factories.ApplicationFormFactory')
 
 
-class FundFormFactory(AbstractRelatedFormFactory):
+class ApplicationBaseFormFactory(AbstractRelatedFormFactory):
     class Meta:
-        model = FundForm
-    fund = factory.SubFactory(FundTypeFactory, parent=None)
+        model = ApplicationBaseForm
+    application = factory.SubFactory(FundTypeFactory)
 
 
 class ApplicationFormFactory(factory.DjangoModelFactory):
@@ -101,21 +126,35 @@ class RoundFactory(wagtail_factories.PageFactory):
     class Meta:
         model = Round
 
+    class Params:
+        now = factory.Trait(
+            start_date=factory.LazyFunction(datetime.date.today),
+            end_date=factory.LazyFunction(lambda: datetime.date.today() + datetime.timedelta(days=7)),
+        )
+
     title = factory.Sequence('Round {}'.format)
-    start_date = factory.LazyFunction(datetime.date.today)
-    end_date = factory.LazyFunction(lambda: datetime.date.today() + datetime.timedelta(days=7))
+    start_date = factory.Sequence(lambda n: datetime.date.today() + datetime.timedelta(days=7 * n + 1))
+    end_date = factory.Sequence(lambda n: datetime.date.today() + datetime.timedelta(days=7 * (n + 1)))
     lead = factory.SubFactory(StaffFactory)
 
     @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            fields = build_form(kwargs, prefix='form')
             for _ in self.workflow.stages:
                 # Generate a form based on all defined fields on the model
-                RoundFormFactory(
+                RoundBaseFormFactory(
                     round=self,
-                    **fields,
+                    **kwargs,
                 )
+                RoundBaseReviewFormFactory(
+                    round=self,
+                    **kwargs,
+                )
+
+
+class SealedRoundFactory(RoundFactory):
+    class Meta:
+        model = SealedRound
 
 
 class TodayRoundFactory(RoundFactory):
@@ -123,94 +162,41 @@ class TodayRoundFactory(RoundFactory):
     end_date = factory.LazyFunction(lambda: datetime.date.today() + datetime.timedelta(days=7))
 
 
-class RoundFormFactory(AbstractRelatedFormFactory):
+class RoundBaseFormFactory(AbstractRelatedFormFactory):
     class Meta:
-        model = RoundForm
-    round = factory.SubFactory(RoundFactory, parent=None)
+        model = RoundBaseForm
+    round = factory.SubFactory(RoundFactory)
 
 
-class LabFactory(wagtail_factories.PageFactory):
+class LabFactory(AbstractApplicationFactory):
     class Meta:
         model = LabType
 
-    class Params:
-        workflow_stages = 1
-        number_forms = 1
-
-    # Will need to update how the stages are identified as Fund Page changes
-    workflow_name = factory.LazyAttribute(lambda o: list(FundType.WORKFLOW_CHOICES.keys())[o.workflow_stages - 1])
     lead = factory.SubFactory(StaffFactory)
 
     @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            fields = build_form(kwargs, prefix='form')
             for _ in self.workflow.stages:
                 # Generate a form based on all defined fields on the model
-                LabFormFactory(
+                LabBaseFormFactory(
                     lab=self,
-                    **fields,
+                    **kwargs,
+                )
+                LabBaseReviewFormFactory(
+                    lab=self,
+                    **kwargs,
                 )
 
 
-class LabFormFactory(AbstractRelatedFormFactory):
+class LabBaseFormFactory(AbstractRelatedFormFactory):
     class Meta:
-        model = LabForm
-    lab = factory.SubFactory(LabFactory, parent=None)
+        model = LabBaseForm
+    lab = factory.SubFactory(LabFactory)
 
 
-class AnswerFactory(factory.Factory):
-    def _create(self, *args, sub_factory=None, **kwargs):
-        return sub_factory.make_answer(kwargs)
-
-
-class Metaclass(factory.base.FactoryMetaClass):
-    def __new__(mcs, class_name, bases, attrs):
-        # Add the form field definitions to allow nested calls
-        wrapped_factories = {
-            k: factory.SubFactory(AnswerFactory, sub_factory=v)
-            for k, v in blocks.CustomFormFieldsFactory.factories.items()
-        }
-        attrs.update(wrapped_factories)
-        return super().__new__(mcs, class_name, bases, attrs)
-
-
-class FormDataFactory(factory.Factory, metaclass=Metaclass):
-    def _create(self, *args, form_fields={}, clean=False, **kwargs):
-        if form_fields and isinstance(form_fields, str):
-            form_fields = json.loads(form_fields)
-            form_definition = {
-                field['type']: field['id']
-                for field in form_fields
-            }
-        else:
-            form_definition = {
-                f.block_type: f.id
-                for f in form_fields or ApplicationSubmission.form_fields.field.to_python(form_fields)
-            }
-
-        form_data = {}
-        for name, answer in kwargs.items():
-            form_data[form_definition[name]] = answer
-
-        if clean:
-            application = ApplicationSubmissionFactory(round=Round.objects.first())
-            application.form_fields = form_fields
-            application.form_data = form_data
-            application.save()
-            form_data = application.form_data.copy()
-            application.delete()
-            return application.form_data
-
-        return form_data
-
-
-class ApplicationRevisionFactory(factory.DjangoModelFactory):
-    class Meta:
-        model = ApplicationRevision
-
-    submission = factory.SubFactory('opentech.apply.funds.tests.factories.ApplicationSubmissionFactory')
-    form_data = factory.SubFactory(FormDataFactory, form_fields=factory.SelfAttribute('..submission.form_fields'), clean=True)
+class ApplicationFormDataFactory(FormDataFactory):
+    field_factory = blocks.CustomFormFieldsFactory
 
 
 class ApplicationSubmissionFactory(factory.DjangoModelFactory):
@@ -219,15 +205,17 @@ class ApplicationSubmissionFactory(factory.DjangoModelFactory):
 
     class Params:
         workflow_stages = 1
-        draft_proposal = factory.Trait(
-            status='draft_proposal',
-            workflow_name='double',
+        rejected = factory.Trait(
+            status='rejected'
         )
 
     form_fields = blocks.CustomFormFieldsFactory
-    form_data = factory.SubFactory(FormDataFactory, form_fields=factory.SelfAttribute('..form_fields'))
+    form_data = factory.SubFactory(
+        ApplicationFormDataFactory,
+        form_fields=factory.SelfAttribute('..form_fields'),
+    )
     page = factory.SubFactory(FundTypeFactory)
-    workflow_name = factory.LazyAttribute(lambda o: list(FundType.WORKFLOW_CHOICES.keys())[o.workflow_stages - 1])
+    workflow_name = factory.LazyAttribute(lambda o: workflow_for_stages(o.workflow_stages))
     round = factory.SubFactory(
         RoundFactory,
         workflow_name=factory.SelfAttribute('..workflow_name'),
@@ -238,7 +226,79 @@ class ApplicationSubmissionFactory(factory.DjangoModelFactory):
     live_revision = None
     draft_revision = None
 
-    @classmethod
-    def _generate(cls, strat, params):
-        params.update(**build_form(params))
-        return super()._generate(strat, params)
+    @factory.post_generation
+    def reviewers(self, create, reviewers, **kwargs):
+        if create and reviewers:
+            self.reviewers.set(reviewers)
+
+
+class InvitedToProposalFactory(ApplicationSubmissionFactory):
+    class Params:
+        workflow_stages = 2
+        draft = factory.Trait(
+            status='draft_proposal',
+        )
+
+    status = 'proposal_discussion'
+    previous = factory.RelatedFactory(
+        ApplicationSubmissionFactory,
+        'next',
+        round=factory.SelfAttribute('..round'),
+        page=factory.SelfAttribute('..page'),
+        status='invited_to_proposal',
+    )
+
+
+class SealedSubmissionFactory(ApplicationSubmissionFactory):
+    page = factory.SubFactory(RequestForPartnersFactory)
+    round = factory.SubFactory(
+        SealedRoundFactory,
+        workflow_name=factory.SelfAttribute('..workflow_name'),
+        lead=factory.SelfAttribute('..lead'),
+        now=True,
+    )
+
+
+class LabSubmissionFactory(ApplicationSubmissionFactory):
+    round = None
+    page = factory.SubFactory(LabFactory)
+
+
+class ApplicationRevisionFactory(factory.DjangoModelFactory):
+    class Meta:
+        model = ApplicationRevision
+
+    submission = factory.SubFactory('opentech.apply.funds.tests.factories.ApplicationSubmissionFactory')
+    form_data = factory.SubFactory(
+        ApplicationFormDataFactory,
+        form_fields=factory.SelfAttribute('..submission.form_fields'),
+        for_factory=ApplicationSubmissionFactory,
+        clean=True,
+    )
+
+
+class AbstractReviewFormFactory(factory.DjangoModelFactory):
+    class Meta:
+        abstract = True
+    form = factory.SubFactory('opentech.apply.review.tests.factories.ReviewFormFactory')
+
+
+class ApplicationBaseReviewFormFactory(AbstractReviewFormFactory):
+    class Meta:
+        model = ApplicationBaseReviewForm
+
+    application = factory.SubFactory(FundTypeFactory)
+
+
+class RoundBaseReviewFormFactory(AbstractReviewFormFactory):
+    class Meta:
+        model = RoundBaseReviewForm
+
+    round = factory.SubFactory(RoundFactory)
+
+
+class LabBaseReviewFormFactory(AbstractReviewFormFactory):
+    class Meta:
+        model = LabBaseReviewForm
+
+    lab = factory.SubFactory(LabFactory)

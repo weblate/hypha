@@ -47,11 +47,22 @@ class FormFieldBlock(StructBlock):
         return kwargs
 
     def get_field(self, struct_value):
-        return self.get_field_class(struct_value)(
-            **self.get_field_kwargs(struct_value))
+        field_kwargs = self.get_field_kwargs(struct_value)
+        return self.get_field_class(struct_value)(**field_kwargs)
+
+    def get_context(self, value, parent_context):
+        context = super().get_context(value, parent_context)
+        parent_context['data'] = self.format_data(parent_context['data']) or self.no_response()
+        return context
 
     def get_searchable_content(self, value, data):
         return str(data)
+
+    def format_data(self, data):
+        return data
+
+    def no_response(self):
+        return "No response"
 
 
 class OptionalFormFieldBlock(FormFieldBlock):
@@ -125,6 +136,9 @@ class CheckboxFieldBlock(FormFieldBlock):
 
     def get_searchable_content(self, value, data):
         return None
+
+    def no_response(self):
+        return False
 
 
 class RadioButtonsFieldBlock(OptionalFormFieldBlock):
@@ -289,6 +303,9 @@ class MultiFileFieldBlock(UploadableMediaBlock):
     class Meta:
         label = _('Multiple File field')
         template = 'stream_forms/render_multi_file_field.html'
+
+    def no_response(self):
+        return [super().no_response()]
 
 
 class FormFieldsBlock(StreamBlock):

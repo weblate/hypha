@@ -10,7 +10,7 @@
     <div class="wrapper wrapper--listings">
 
         {% if subpages.object_list.exists %}
-            {% for subpage in subpages.object_list.specific %}
+            {% for subpage in subpages.object_list %}
 
                 <a class="listing" href="{% pageurl subpage %}">
                     {% if subpage.icon %}
@@ -21,10 +21,18 @@
                         </div>
                     {% endif %}
 
-                    {% if subpage.deadline %}
+                    {% if subpage.can_open %}
                         <p class="listing__deadline">
-                            <svg class="icon icon--calendar icon--small"><use xlink:href="#calendar"></use></svg>
-                            <span>Next deadline: {{ subpage.deadline|date:"M j, Y" }}</span>
+                            {% if subpage.is_open %}
+                                {% if subpage.deadline %}
+                                    <svg class="icon icon--calendar icon--small"><use xlink:href="#calendar"></use></svg>
+                                    <span>Next deadline: {{ subpage.deadline|date:"M j, Y" }}</span>
+                                {% else %}
+                                    Open
+                                {% endif %}
+                            {% else %}
+                                Closed
+                            {% endif %}
                         </p>
                     {% endif %}
 

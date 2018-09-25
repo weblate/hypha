@@ -1,8 +1,10 @@
 from django import forms
 from django.contrib.auth import get_user_model
+from django.utils.translation import gettext_lazy as _
 
 from wagtail.users.forms import UserEditForm, UserCreationForm
 
+from django_select2.forms import Select2Widget
 
 User = get_user_model()
 
@@ -34,6 +36,13 @@ class ProfileForm(forms.ModelForm):
         if not self.instance.is_apply_staff:
             del self.fields['slack']
 
+        if not self.instance.has_usable_password():
+            # User is registered with oauth - no password change allowed
+            email_field = self.fields['email']
+            email_field.disabled = True
+            email_field.required = False
+            email_field.help_text = _('You are registered using OAuth, please contact an admin if you need to change your email address.')
+
     def clean_slack(self):
         slack = self.cleaned_data['slack']
         if slack:
@@ -45,3 +54,13 @@ class ProfileForm(forms.ModelForm):
                 slack = '@' + slack
 
         return slack
+
+
+class BecomeUserForm(forms.Form):
+    user = forms.ModelChoiceField(
+        widget=Select2Widget,
+        help_text="Only includes active, non-superusers",
+        queryset=User.objects.filter(is_active=True, is_superuser=False),
+        label='',
+        required=False,
+    )

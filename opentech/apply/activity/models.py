@@ -1,11 +1,12 @@
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+from django.db.models import Case, When, Value
+from django.db.models.functions import Concat
 
-from django_fsm.signals import post_transition
+from .options import MESSAGES
 
-from opentech.apply.funds.models import ApplicationSubmission
 
 COMMENT = 'comment'
 ACTION = 'action'
@@ -14,23 +15,25 @@ ACTIVITY_TYPES = {
     COMMENT: 'Comment',
     ACTION: 'Action',
 }
-
+PRIVATE = 'private'
 PUBLIC = 'public'
 REVIEWER = 'reviewers'
 INTERNAL = 'internal'
 
 
 VISIBILILTY_HELP_TEXT = {
-    PUBLIC: 'Visible to all users of application system.',
+    PRIVATE: 'Visible to applicant and staff.',
     REVIEWER: 'Visible to reviewers and staff.',
     INTERNAL: 'Visible only to staff.',
+    PUBLIC: 'Visible to all users of the application system.',
 }
 
 
 VISIBILITY = {
-    PUBLIC: 'Public',
-    REVIEWER: 'Reviewers',
+    PRIVATE: 'Private',
+    REVIEWER: 'Reviewers and Staff',
     INTERNAL: 'Internal',
+    PUBLIC: 'Public',
 }
 
 
@@ -64,6 +67,10 @@ class CommentManger(ActivityBaseManager):
     type = COMMENT
 
 
+class ActionQueryset(BaseActivityQuerySet):
+    pass
+
+
 class ActionManager(ActivityBaseManager):
     type = ACTION
 
@@ -76,17 +83,28 @@ class Activity(models.Model):
     message = models.TextField()
     visibility = models.CharField(choices=VISIBILITY.items(), default=PUBLIC, max_length=10)
 
+    # Fields for generic relations to other objects. related_object should implement `get_absolute_url`
+    content_type = models.ForeignKey(ContentType, blank=True, null=True, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField(blank=True, null=True)
+    related_object = GenericForeignKey('content_type', 'object_id')
+
     objects = models.Manager.from_queryset(ActivityQuerySet)()
     comments = CommentManger.from_queryset(CommentQueryset)()
-    actions = ActionManager()
+    actions = ActionManager.from_queryset(ActionQueryset)()
 
     class Meta:
         ordering = ['-timestamp']
         base_manager_name = 'objects'
 
     @property
+    def priviledged(self):
+        # Not visible to applicant
+        return self.visibility not in [PUBLIC, PRIVATE]
+
+    @property
     def private(self):
-        return self.visibility != PUBLIC
+        # not visible to all
+        return self.visibility not in [PUBLIC]
 
     def __str__(self):
         return '{}: for "{}"'.format(self.get_type_display(), self.submission)
@@ -94,38 +112,42 @@ class Activity(models.Model):
     @classmethod
     def visibility_for(cls, user):
         if user.is_apply_staff:
-            return [PUBLIC, REVIEWER, INTERNAL]
+            return [PRIVATE, REVIEWER, INTERNAL, PUBLIC]
         if user.is_reviewer:
-            return [PUBLIC, REVIEWER]
-        return [PUBLIC]
+            return [REVIEWER, PUBLIC]
+        return [PRIVATE, PUBLIC]
 
     @classmethod
     def visibility_choices_for(cls, user):
         return [(choice, VISIBILITY[choice]) for choice in cls.visibility_for(user)]
 
 
-@receiver(post_save, sender=ApplicationSubmission)
-def log_submission_activity(sender, **kwargs):
-    if kwargs.get('created', False):
-        submission = kwargs.get('instance')
+class Event(models.Model):
+    """Model to track when messages are triggered"""
 
-        Activity.actions.create(
-            user=submission.user,
-            submission=submission,
-            message=f'Submitted {submission.title} for {submission.page.title}'
-        )
+    when = models.DateTimeField(auto_now_add=True)
+    type = models.CharField(choices=MESSAGES.choices(), max_length=50)
+    by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    submission = models.ForeignKey('funds.ApplicationSubmission', related_name='+', on_delete=models.CASCADE)
+
+    def __str__(self):
+        return ' '.join([self.get_type_display(), 'by:', str(self.by), 'on:', self.submission.title])
 
 
-@receiver(post_transition, sender=ApplicationSubmission)
-def log_status_update(sender, **kwargs):
-    instance = kwargs['instance']
-    old_phase = instance.workflow[kwargs['source']].display_name
-    new_phase = instance.workflow[kwargs['target']].display_name
+class Message(models.Model):
+    """Model to track content of messages sent from an event"""
 
-    by = kwargs['method_kwargs']['by']
+    type = models.CharField(max_length=15)
+    content = models.TextField()
+    recipient = models.CharField(max_length=250)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE)
+    status = models.TextField()
+    external_id = models.CharField(max_length=75, null=True, blank=True)  # Stores the id of the object from an external system
 
-    Activity.actions.create(
-        user=by,
-        submission=instance,
-        message=f'Progressed from {old_phase} to {new_phase}'
-    )
+    def update_status(self, status):
+        if status:
+            self.status = Case(
+                When(status='', then=Value(status)),
+                default=Concat('status', Value('<br />' + status))
+            )
+            self.save()

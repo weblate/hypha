@@ -17,7 +17,7 @@ from hijack.views import login_with_id
 from wagtail.admin.views.account import password_management_enabled
 
 from .decorators import require_oauth_whitelist
-from .forms import ProfileForm
+from .forms import BecomeUserForm, ProfileForm
 
 
 User = get_user_model()
@@ -36,28 +36,28 @@ class AccountView(UpdateView):
 
     def get_context_data(self, **kwargs):
         if self.request.user.is_superuser:
-            swappable = User.objects.filter(is_active=True, is_superuser=False)
+            swappable_form = BecomeUserForm()
         else:
-            swappable = []
+            swappable_form = None
 
         show_change_password = password_management_enabled() and self.request.user.has_usable_password(),
 
         return super().get_context_data(
-            swappable=swappable,
+            swappable_form=swappable_form,
             show_change_password=show_change_password,
             **kwargs,
         )
 
 
-@login_required(login_url=reverse_lazy('users:login'))
+@login_required()
 def become(request):
-    if request.POST:
-        id = request.POST['user']
+    id = request.POST['user']
+    if request.POST and id:
         return login_with_id(request, id)
     return redirect('users:account')
 
 
-@login_required(login_url=reverse_lazy('users:login'))
+@login_required()
 @require_oauth_whitelist
 def oauth(request):
     """Generic, empty view for the OAuth associations."""

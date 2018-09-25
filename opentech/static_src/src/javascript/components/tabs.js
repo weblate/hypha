@@ -5,7 +5,7 @@ class Tabs {
 
     constructor() {
         // The tabs
-        this.tabItems = Array.prototype.slice.call(document.querySelectorAll('.tab__item'));
+        this.tabItems = Array.prototype.slice.call(document.querySelectorAll('.tab__item:not(.js-tabs-off)'));
 
         // The tabs content
         this.tabsContents = Array.prototype.slice.call(document.querySelectorAll('.tabs__content'));
@@ -43,11 +43,10 @@ class Tabs {
 
     tabs(e) {
         // Find current tab
-        this.stripTabClasses();
-
         const tab = e.currentTarget;
-
+        this.stripTabClasses();
         this.addTabClasses(tab);
+        this.updateUrl(tab);
     }
 
     stripTabClasses(){
@@ -66,6 +65,10 @@ class Tabs {
         // add active classes to tabs and their respecitve content
         tab.classList.add(this.tabActiveClass);
         document.querySelector(`#${tabId}`).classList.add(this.tabContentActiveClass);
+    }
+
+    updateUrl(tab){
+        window.location.hash = tab.getAttribute('href');
     }
 }
 
