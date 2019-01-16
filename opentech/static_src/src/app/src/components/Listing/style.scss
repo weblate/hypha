@@ -1,6 +1,8 @@
 $listing-header-height: 75px;
 
 .listing {
+    background-color: $color--white;
+
     &__header {
         @include submission-list-item;
         height: $listing-header-height;
