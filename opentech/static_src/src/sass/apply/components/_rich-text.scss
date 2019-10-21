@@ -1,20 +1,37 @@
 .rich-text {
     margin-bottom: 2rem;
+    word-break: break-word;
 
     &--answers {
-        > div {
+        > section {
             margin: 0 0 1rem;
+
+            p:first-of-type {
+                margin-top: 0;
+            }
+
+            p:empty {
+                margin: 0;
+            }
         }
 
-        h5 {
+        h4 {
             margin: 0;
+        }
+    }
+
+    &--hidden {
+        display: none;
+
+        &.is-open {
+            display: block;
         }
     }
 
     a {
         font-weight: $weight--bold;
         border-bottom: 1px solid transparent;
-        transition: border, color, 0.15s ease-in-out;
+        transition: border, color, .15s ease-in-out;
 
         &:hover {
             border-bottom: 1px solid $color--primary;
@@ -24,9 +41,41 @@
     ul {
         padding-left: 20px;
         list-style: outside disc;
+
+        &.remove-list-style {
+            padding: 0;
+            list-style: none;
+        }
     }
 
     ol {
         list-style: inside decimal;
+    }
+}
+
+.mce-widget {
+    &.mce-wordcount {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    &.word-count-warning,
+    &.word-count-warning-2 {
+        background-color: $color--pastel-red;
+        font-weight: bold;
+        text-shadow: none;
+        color: $color--black;
+
+        &::before {
+            content: 'Close to the limit (1000): ';
+        }
+    }
+
+    &.word-count-warning-2 {
+        background-color: $color--tomato;
+
+        &::before {
+            content: 'Over the limit (1000): ';
+        }
     }
 }

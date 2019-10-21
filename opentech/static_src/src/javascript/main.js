@@ -1,99 +1,160 @@
-import jQuery from './globals';
-import MobileMenu from './components/mobile-menu';
-import Search from './components/search';
-import MobileSearch from './components/mobile-search';
-import Tabs from './components/tabs';
-import listInputFiles from './components/list-input-files';
-import toggleActionsPanel from './components/toggle-actions-panel';
-import activityFeed from './components/activity-feed';
-import messages from './components/messages';
-import fancyboxGlobal from './components/fancybox-global';
-import allSubmissions from './components/all-submissions-table';
-import allReviews from './components/all-reviews-table';
-import submissionFilters from './components/submission-filters';
-import mobileFilterPadding from './components/mobile-filter-padding';
-import generateTooltips from './components/submission-tooltips';
-import DeterminationCopy from './components/determination-template';
-import toggleReviewers from './components/toggle-reviewers';
 
 (function ($) {
-    $(document).ready(function(){
-        // remove no-js class if js is enabled
-        document.querySelector('html').classList.remove('no-js');
 
-        $(MobileMenu.selector()).each((index, el) => {
-            new MobileMenu($(el), $('.js-mobile-menu-close'), $('.header__menus--mobile'), $('.header__search'));
-        });
+    'use strict';
 
-        $(Search.selector()).each((index, el) => {
-            new Search($(el), $('.header__search'));
-        });
+    // IE 11 does not support classList.replace.
+    // document.querySelector('html').classList.replace('no-js', 'js');
+    $('html').removeClass('no-js').addClass('js');
 
-        $(MobileSearch.selector()).each((index, el) => {
-            new MobileSearch($(el), $('.header__menus--mobile'), $('.header__search'), $('.js-search-toggle'));
-        });
+    let Search = class {
+        static selector() {
+            return '.js-search-toggle';
+        }
 
-        $(Tabs.selector()).each((index, el) => {
-            new Tabs($(el));
-        });
+        constructor(node, searchForm) {
+            this.node = node;
+            this.searchForm = searchForm;
+            this.bindEventListeners();
+        }
 
-        // $(DeterminationCopy.selector()).each((index, el) => {
-        //     new DeterminationCopy($(el));
-        // });
+        bindEventListeners() {
+            this.node.click(this.toggle.bind(this));
+        }
 
-        // Add tooltips to truncated titles on submissions overview table
-        generateTooltips();
+        toggle() {
+            // show the search
+            this.searchForm[0].classList.toggle('is-visible');
 
-        // Show list of selected files for upload on input[type=file]
-        listInputFiles();
+            // swap the icons
+            this.node[0].querySelector('.header__icon--open-search').classList.toggle('is-hidden');
+            this.node[0].querySelector('.header__icon--close-search').classList.toggle('is-unhidden');
 
-        // Show actions sidebar on mobile
-        toggleActionsPanel();
+            // add modifier to header to be able to change header icon colours
+            document.querySelector('.header').classList.toggle('search-open');
+        }
+    };
 
-        // Global fancybox options
-        fancyboxGlobal();
+    let MobileMenu = class {
+        static selector() {
+            return '.js-mobile-menu-toggle';
+        }
 
-        // Activity feed logic
-        activityFeed();
+        constructor(node, closeButton, mobileMenu, search) {
+            this.node = node;
+            this.closeButton = closeButton;
+            this.mobileMenu = mobileMenu;
+            this.search = search;
 
-        // messages logic
-        messages();
+            this.bindEventListeners();
+        }
 
-        // Submissions overview table logic
-        allSubmissions();
+        bindEventListeners() {
+            this.node.click(this.toggle.bind(this));
+            this.closeButton.click(this.toggle.bind(this));
+        }
 
-        // All reviews table logic
-        // allReviews();
+        toggle() {
+            // toggle mobile menu
+            this.mobileMenu[0].classList.toggle('is-visible');
 
-        // Submission filters logic
-        submissionFilters();
+            // check if search exists
+            if (document.body.contains(this.search[0])) {
+                // reset the search whenever the mobile menu is toggled
+                if (this.search[0].classList.contains('is-visible')) {
+                    this.search[0].classList.toggle('is-visible');
+                    document.querySelector('.header__inner--menu-open').classList.toggle('header__inner--search-open');
+                }
+            }
 
-        // Toggle all reviewers in the sidebar
-        toggleReviewers();
+            // reset the search show/hide icons
+            if (this.mobileMenu[0].classList.contains('is-visible') && document.body.contains(this.search[0])) {
+                document.querySelector('.header__icon--open-search-menu-closed').classList.remove('is-hidden');
+                document.querySelector('.header__icon--close-search-menu-closed').classList.remove('is-unhidden');
+            }
+        }
+    };
+
+    let MobileSearch = class {
+        static selector() {
+            return '.js-mobile-search-toggle';
+        }
+
+        constructor(node, mobileMenu, searchForm, searchToggleButton) {
+            this.node = node;
+            this.mobileMenu = mobileMenu[0];
+            this.searchForm = searchForm[0];
+            this.searchToggleButton = searchToggleButton[0];
+            this.bindEventListeners();
+        }
+
+        bindEventListeners() {
+            this.node.click(this.toggle.bind(this));
+        }
+
+        toggle() {
+            // hide the mobile menu
+            this.mobileMenu.classList.remove('is-visible');
+
+            // wait for the mobile menu to close
+            setTimeout(() => {
+                // open the search
+                this.searchForm.classList.add('is-visible');
+
+                // swap the icons
+                this.searchToggleButton.querySelector('.header__icon--open-search').classList.add('is-hidden');
+                this.searchToggleButton.querySelector('.header__icon--close-search').classList.add('is-unhidden');
+            }, 250);
+        }
+    };
+
+    $(MobileMenu.selector()).each((index, el) => {
+        new MobileMenu($(el), $('.js-mobile-menu-close'), $('.header__menus--mobile'), $('.header__search'));
     });
 
-    // Add active class to select2 checkboxes after page has been filtered
-    document.addEventListener('DOMContentLoaded', () => {
-        // If there are clear buttons in the dom, it means the filters have been applied
-        const clearButtons = document.querySelectorAll('.select2-selection__clear');
-        clearButtons.forEach(clearButton => {
-            clearButton.parentElement.parentElement.classList.add('is-active');
-        });
+    $(Search.selector()).each((index, el) => {
+        new Search($(el), $('.header__search'));
+    });
+
+    $(MobileSearch.selector()).each((index, el) => {
+        new MobileSearch($(el), $('.header__menus--mobile'), $('.header__search'), $('.js-search-toggle'));
+    });
+
+    // Close the message
+    $('.js-close-message').click((e) => {
+        e.preventDefault();
+        var message = e.target.closest('.js-message');
+        message.classList.add('messages__text--hide');
     });
 
     // reset mobile filters if they're open past the tablet breakpoint
-    $(window).resize(function resize(){
-        if ($(window).width() < 768) {
-            $('.select2').on('click', (e) => {
-                mobileFilterPadding(e.target);
-            });
-        } else {
-            $('body').removeClass('no-scroll');
-            $('.js-filter-wrapper').removeClass('is-open');
-            $('.js-filter-list').removeClass('form__filters--mobile');
+    $(window).resize(function resize() {
+        if ($(window).width() > 1024) {
             $('.js-actions-toggle').removeClass('is-active');
             $('.js-actions-sidebar').removeClass('is-visible');
             $('.tr--parent.is-expanded').removeClass('is-expanded');
         }
     }).trigger('resize');
+
+    $('form').filter('.form__comments').submit(function (e) {
+        var $form = $(this);
+        var formValues = $form.serialize();
+        var previousValues = $form.attr('data-django-form-submit-last');
+
+        if (previousValues === formValues) {
+            // Previously submitted - don't submit again
+            e.preventDefault();
+        }
+        else {
+            $form.attr('data-django-form-submit-last', formValues);
+        }
+    });
+
+    // Get the header and admin bar height and set custom prop with value
+    $(window).on('load', function () {
+        const headerHeight = $('.header').outerHeight();
+        const adminbarHeight = $('.admin-bar').outerHeight();
+        document.documentElement.style.setProperty('--header-admin-height', headerHeight + adminbarHeight + 'px');
+    });
+
 })(jQuery);

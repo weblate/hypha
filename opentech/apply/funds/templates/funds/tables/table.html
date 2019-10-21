@@ -1,23 +1,26 @@
 {% extends 'django_tables2/table.html' %}
-{% load django_tables2 table_tags review_tags %}
+{% load django_tables2 table_tags review_tags wagtailimages_tags i18n %}
 
 {% block table.tbody.row %}
     <tr {{ row.attrs.as_html }}>
         {% for column, cell in row.items %}
             <td {{ column.attrs.td.as_html }}>
-                <span class="mobile-label {{ column.attrs.td.class }}">{{ column.header }}: </span>
+                {% if column.name != "selected" %}
+                    <span class="mobile-label {{ column.attrs.td.class }}">{{ column.header }}: </span>
+                {% endif %}
                 {% if column.localize == None %}{{ cell }}{% else %}{% if column.localize %}{{ cell|localize }}{% else %}{{ cell|unlocalize }}{% endif %}{% endif %}
             </td>
         {% endfor %}
     </tr>
 
     {% with submission=row.record %}
-        <tr class="all-submissions__child" data-parent-id="{{ submission.id }}">
+        <tr class="all-submissions-table__child" data-parent-id="{{ submission.id }}">
             <td colspan="{{ table.columns|length }}">
                 <table class="submission-meta">
                     <tr class="submission-meta__row">
                         <th><h6 class="heading heading--normal heading--no-margin">Applicant</h6></th>
                         <th><h6 class="heading heading--normal heading--no-margin">Last updated</h6></th>
+                        <th><h6 class="heading heading--normal heading--no-margin">Screening status</h6></th>
                         <th><h6 class="heading heading--normal heading--no-margin">Review outcomes</h6></th>
                     </tr>
                     <tr class="submission-meta__row submission-meta__row--black">
@@ -31,11 +34,44 @@
                             {% endif %}
                         </td>
                         <td>
+                            <strong>{{ submission.screening_status|default:"Awaiting Screen status" }}</strong>
+                        </td>
+
+                        <td>
                             <ul class="list list--no-margin">
-                                {% for review in submission.reviews.all %}
+                                {% for reviewer in submission.has_reviewed %}
                                     <li class="list__item list__item--reviewer">
-                                        <span class="list__item--reviewer-name">{{ review.author }}</span>
-                                        <span class="list__item list__item--reviewer-outcome">{{ review.get_recommendation_display }}</span>
+                                        <span class="list__item--reviewer-name">
+                                            {{ reviewer }}
+                                            {% if reviewer.role %}{% image reviewer.role.icon max-12x12 %}{% endif %}
+                                        </span>
+                                        <span class="list__item list__item--reviewer-outcome">{{ reviewer.review.get_recommendation_display }}</span>
+                                    </li>
+                                    {% for opinion in reviewer.review.opinions.all %}
+                                        {% if forloop.first %}
+                                            <ul class="list list--opinion">
+                                        {% endif %}
+
+                                            <li class="list__item list__item--reviewer list__item--opinion">
+                                                <span class="list__item--reviewer-name">
+                                                    {{ opinion.author }}
+                                                    {% if opinion.author.role %}{% image opinion.author.role.icon max-12x12 %}{% endif %}
+                                                </span>
+                                                <span class="list__item list__item--reviewer-outcome {{ opinion.get_opinion_display|lower }}">{{ opinion.get_opinion_display }}</span>
+                                            </li>
+
+                                        {% if forloop.last %}
+                                            </ul>
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                                {% for reviewer in submission.hasnt_reviewed %}
+                                    <li class="list__item list__item--reviewer">
+                                        <span class="list__item--reviewer-name">
+                                            {{ reviewer }}
+                                            {% if reviewer.role %}{% image reviewer.role.icon max-12x12 %}{% endif %}
+                                        </span>
+                                        <span class="list__item list__item--reviewer-outcome">&mdash;</span>
                                     </li>
                                 {% endfor %}
                             </ul>
@@ -48,12 +84,13 @@
 
     {% if row.record.previous %}
         {# we have a linked application, re-render the header row #}
-        <tr class="all-submissions__child" data-parent-id="{{ row.record.id }}">
+        <tr class="all-submissions-table__child" data-parent-id="{{ row.record.id }}">
             <td colspan="{{ table.columns|length }}">
                 <table class="submission-meta">
                     <tr class="submission-meta__row">
                     {% for column in row.table.columns %}
                         {% if forloop.first %}
+                        {% elif forloop.counter == 2 %}
                             <th>Linked {{ row.record.previous.stage }}</th>
                         {% else %}
                             <th class="th th--{{ column.header|lower }}">{{ column.header }}</th>
@@ -63,7 +100,13 @@
 
                     {# mutate the row to render the data for the child row #}
                     {% with row=row|row_from_record:row.record.previous %}
-                        {{ block.super }}
+                        <tr {{ row.attrs.as_html }}>
+                            {% for column, cell in row.items %}
+                                {% if column.name != "selected" %}
+                                    <td {{ column.attrs.td.as_html }}>{% if column.localize == None %}{{ cell }}{% else %}{% if column.localize %}{{ cell|localize }}{% else %}{{ cell|unlocalize }}{% endif %}{% endif %}</td>
+                                    {% endif %}
+                            {% endfor %}
+                        </tr>
                     {% endwith %}
                 </table>
             </td>
@@ -71,3 +114,35 @@
     {% endif %}
 
 {% endblock %}
+
+{% block table.tbody.empty_text %}
+<tr class="all-submissions-table__empty"><td colspan="{{ table.columns|length }}">{{ table.empty_text }}</td></tr>
+{% endblock table.tbody.empty_text %}
+
+{% block pagination %}
+    {% if table.page and table.paginator.num_pages > 1 %}
+    <ul class="pagination">
+        {% if table.page.has_previous %}
+            <li class="previous">
+                <a href="{% querystring table.prefixed_page_field=table.page.previous_page_number %}">
+                    {% trans 'previous' %}
+                </a>
+            </li>
+        {% endif %}
+        {% if table.page.has_previous or table.page.has_next %}
+            <li class="cardinality">
+                <p>
+                    Page {{ table.page.number }}
+                </p>
+            </li>
+        {% endif %}
+        {% if table.page.has_next %}
+            <li class="next">
+                <a href="{% querystring table.prefixed_page_field=table.page.next_page_number %}">
+                    {% trans 'next' %}
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+    {% endif %}
+{% endblock pagination %}

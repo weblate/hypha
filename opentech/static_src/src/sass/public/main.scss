@@ -1,6 +1,3 @@
-// Vendor
-@import 'vendor/normalize';
-
 // Abstracts
 @import 'abstracts/functions';
 @import 'abstracts/mixins';
@@ -14,6 +11,7 @@
 @import 'components/apply-bar';
 @import 'components/button';
 @import 'components/blockquote';
+@import 'components/editor';
 @import 'components/card';
 @import 'components/call-to-action';
 @import 'components/form';

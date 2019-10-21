@@ -1,5 +1,7 @@
 import logging
 
+import uuid
+
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponseRedirect
@@ -70,14 +72,19 @@ class MailchimpSubscribeView(FormMixin, RedirectView):
 
     def warning(self, e):
         messages.warning(self.request, _('Sorry, there has been an problem. Please try again later.'))
-        logger.error(e.args[0])
+        # If there is a problem with subscribing uncomment this to get notifications.
+        # When things work warnings is only about spam scipts.
+        # logger.error(e.args[0])
 
     def success(self):
         messages.success(self.request, _('Thank you for subscribing'))
 
     def get_success_url(self):
-        # Go back to where you came from
-        return self.request.META['HTTP_REFERER']
+        # Go back to where you came from, default to front page.
+        origin = self.request.META.get('HTTP_ORIGIN') or self.request.META.get('HTTP_REFERER') or '/'
+
+        # Add cache busting query string.
+        return origin + '?newsletter-' + uuid.uuid4().hex
 
     def get_redirect_url(self):
         # We don't know where you came from, go home

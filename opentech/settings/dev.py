@@ -6,9 +6,11 @@ DEBUG = True
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'CHANGEME!!!'
 
+WAGTAIL_CACHE = False
+
 INTERNAL_IPS = ('127.0.0.1', '10.0.2.2')
 
-ALLOWED_HOSTS = ['apply.localhost', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['apply.localhost', 'localhost', '127.0.0.1', 'dev.otf.is', 'dev-apply.otf.is']
 
 BASE_URL = 'http://localhost:8000'
 
@@ -20,6 +22,7 @@ INSTALLED_APPS = INSTALLED_APPS + [
     'wagtail.contrib.styleguide',
 ]
 
+
 SECURE_SSL_REDIRECT = False
 
 # Change these in local.py.
@@ -30,6 +33,9 @@ try:
     from .local import *  # noqa
 except ImportError:
     pass
+
+PROJECTS_ENABLED = True
+PROJECTS_AUTO_CREATE = True
 
 # We add these here so they can react on settings made in local.py.
 
@@ -109,3 +115,8 @@ if DEBUGTOOLBAR:
     MIDDLEWARE = [
         'debug_toolbar.middleware.DebugToolbarMiddleware',
     ] + MIDDLEWARE
+
+
+WEBPACK_LOADER['DEFAULT'].update({
+    'STATS_FILE': os.path.join(BASE_DIR, './opentech/static_compiled/app/webpack-stats.json'),
+})

@@ -1,5 +1,5 @@
 {% extends "base-apply.html" %}
-{% load workflow_tags %}
+{% load static workflow_tags wagtailcore_tags statusbar_tags %}
 {% block title %}{{ object.title }}{% endblock %}
 {% block body_class %}{% endblock %}
 {% block content %}
@@ -13,11 +13,19 @@
         <h1 class="beta heading heading--no-margin heading--bold">{{ object.title }}</h1>
         <h5 class="heading heading--meta">
             <span>{{ object.stage }}</span>
-            <span>{{ object.page }}</span>
-            <span>{{ object.round }}</span>
-            <span>Lead: {{ object.lead }}</span>
+            <span>{% if public_page %}<a class="link--transparent link--underlined" href="{% pageurl public_page %}" >{{ object.page }}</a>{% else %}{{ object.page }}{% endif %}</span>
+            {% if request.user.is_apply_staff and object.round %}
+                <span><a class="link--transparent link--underlined" href="{% url 'apply:rounds:detail' pk=object.round.pk %}">{{ object.round }}</a></span>
+            {% else %}
+                <span>{{ object.round }}</span>
+            {% endif %}
+            {% if request.user.is_apply_staff %}
+                <span>Lead: <a class="link--transparent link--underlined" href="{% url 'apply:submissions:list' %}?lead={{ object.lead.id }}">{{ object.lead }}</a></span>
+            {% else %}
+                <span>Lead: {{ object.lead }}</span>
+            {% endif %}
         </h5>
-        {% include "funds/includes/status_bar.html" with phases=object.workflow current_phase=object.phase same_stage=True%}
+        {% status_bar object.workflow object.phase request.user author=object.user same_stage=True %}
 
         <div class="tabs js-tabs">
             <div class="tabs__container">
@@ -32,7 +40,7 @@
                 <a class="tab__item" href="#activity-feed" data-tab="tab-3">
                     Activity Feed
                 </a>
-                {% if request.user.is_superuser %}
+                {% if request.user.is_apply_staff %}
                 <a class="tab__item tab__item--right js-tabs-off" href="{% url 'admin:activity_event_changelist' %}?submission__id={{ object.id }}">
                     View message log
                 </a>
@@ -42,72 +50,96 @@
     </div>
 </div>
 
-<div class="wrapper wrapper--large wrapper--tabs">
+<div class="wrapper wrapper--large wrapper--tabs js-tabs-content">
 {# Tab 1 #}
     <div class="tabs__content" id="tab-1">
-        {% block admin_actions %}
+        {% block mobile_actions %}
         {% endblock %}
         <div class="wrapper wrapper--sidebar">
             {% if request.user|has_edit_perm:object and object.status == 'draft_proposal' and not request.user.is_apply_staff %}
-                <div>
+                <div class="wrapper--sidebar--inner">
                     <h4>Congratulations!</h4>
                     <h5>Your {{ object.previous.stage }} application has been accepted.</h5>
                     <a class="button button--primary" href="{% url 'funds:submissions:edit' object.id %}">Start your {{ object.stage }} application</a>
                 </div>
             {% else %}
-                <div>
-                    <h6 class="heading heading--submission-meta">
+                <article class="wrapper--sidebar--inner">
+                    <header class="heading heading--submission-meta heading-text zeta">
                         <span>Submitted: <strong>{{ object.submit_time.date }} by {{ object.user.get_full_name }}</strong></span>
                         <span>Last edited: <strong>{{ object.live_revision.timestamp.date }} by {{ object.live_revision.author }}</strong></span>
-                        {% if request.user|has_edit_perm:object %}
-                            <a class="link link--edit-submission is-active" href="{% url 'funds:submissions:edit' object.id %}">
-                                Edit
-                                <svg class="icon icon--pen"><use xlink:href="#pen"></use></svg>
-                            </a>
-                        {% else %}
-                            <span class="link link--edit-submission">
-                                Edit
-                                <svg class="icon icon--padlock"><use xlink:href="#padlock"></use></svg>
-                            </span>
-                        {% endif %}
-                    </h6>
+                        <div class="wrapper wrapper--submission-actions">
+                            {% if perms.funds.delete_applicationsubmission %}
+                                <a class="link link--delete-submission is-active" href="{% url 'funds:submissions:delete' object.id %}">
+                                    Delete
+                                    <svg class="icon icon--delete"><use xlink:href="#delete"></use></svg>
+                                </a>
+                            {% endif %}
+                            {% if request.user|has_edit_perm:object %}
+                                <a class="link link--edit-submission is-active" href="{% url 'funds:submissions:edit' object.id %}">
+                                    Edit
+                                    <svg class="icon icon--pen"><use xlink:href="#pen"></use></svg>
+                                </a>
+                            {% else %}
+                                <span class="link link--edit-submission">
+                                    Edit
+                                    <svg class="icon icon--padlock"><use xlink:href="#padlock"></use></svg>
+                                </span>
+                            {% endif %}
+                        </div>
+                    </header>
 
                     {% include "funds/includes/rendered_answers.html" %}
-                </div>
+
+                </article>
             {% endif %}
 
             <aside class="sidebar">
-                {% if request.user.is_apply_staff %}
-                    {% block sidebar_forms %}
-                    {% endblock %}
+                {% block sidebar_top %}
+                {% endblock %}
+
+                {% if object.project and PROJECTS_ENABLED %}
+                    {% include 'funds/includes/project_block.html' %}
                 {% endif %}
 
                 {% block determination %}
                     {% include 'determinations/includes/applicant_determination_block.html' with submission=object %}
                 {% endblock %}
 
+                {% if request.user.is_apply_staff %}
+                    {% block screening_status %}
+                    {% endblock %}
+                    {% block meta_terms %}
+                    {% endblock %}
+                {% endif %}
+
                 {% block reviews %}
                 {% endblock %}
 
-                {% if other_submissions or object.previous or object.next %}
-                    <div class="sidebar__inner">
-                        {% if object.previous %}
-                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.previous.id %}">View linked {{ object.previous.stage }}</a></h6>
-                        {% endif %}
-
-                        {% if object.next %}
-                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.next.id %}">View linked {{ object.next.stage }}</a></h6>
-                        {% endif %}
-
-                        {% for submission in other_submissions %}
-                            {% if forloop.first %}
-                                <h6 class="heading heading--light-grey heading--small heading--uppercase">Past Submissions</h6>
+                {% block related %}
+                    {% if other_submissions or object.previous or object.next %}
+                        <div class="sidebar__inner related-sidebar">
+                            <h5>Related submissions</h5>
+                            {% if object.previous %}
+                                <p><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.previous.id %}">View linked {{ object.previous.stage }}</a></p>
                             {% endif %}
 
-                            <h6><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' submission.id %}">{{ submission.title }}</a></h6>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+                            {% if object.next %}
+                                <p><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' object.next.id %}">View linked {{ object.next.stage }}</a></p>
+                            {% endif %}
+
+                            {% for submission in other_submissions %}
+                                {% if forloop.first %}
+                                <h6 class="heading heading--light-grey heading--uppercase">Past Submissions</h6>
+                                <ul>
+                                {% endif %}
+                                <li><a class="link link--underlined link--bold" href="{% url 'funds:submissions:detail' submission.id %}">{{ submission.title }}</a></li>
+                                {% if forloop.last %}
+                                </ul>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endblock %}
             </aside>
         </div>
     </div>
@@ -116,7 +148,7 @@
     <div class="tabs__content" id="tab-2">
         <div class="feed">
             {% include "activity/include/comment_form.html" %}
-            {% include "activity/include/comment_list.html" %}
+            {% include "activity/include/comment_list.html" with editable=True %}
         </div>
     </div>
 
@@ -127,4 +159,11 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ comment_form.media.js }}
+    <script src="{% static 'js/apply/tabs.js' %}"></script>
+    <script src="{% static 'js/apply/submission-text-cleanup.js' %}"></script>
+    <script src="{% static 'js/apply/edit-comment.js' %}"></script>
 {% endblock %}

@@ -4,6 +4,7 @@ from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.conf import settings
 
 from modelcluster.fields import ParentalKey
+from pagedown.widgets import PagedownWidget
 
 from wagtail.core.models import Orderable, PageManager, PageQuerySet
 from wagtail.core.fields import StreamField
@@ -201,7 +202,7 @@ class PersonIndexPage(BasePage):
     introduction = models.TextField(blank=True)
 
     content_panels = BasePage.content_panels + [
-        FieldPanel('introduction'),
+        FieldPanel('introduction', widget=PagedownWidget()),
     ]
 
     search_fields = BasePage.search_fields + [
@@ -217,7 +218,7 @@ class PersonIndexPage(BasePage):
             'person_types__person_type',
         )
 
-        if request.GET.get('person_type'):
+        if request.GET.get('person_type') and request.GET.get('person_type').isdigit():
             people = people.filter(person_types__person_type=request.GET.get('person_type'))
 
         if not request.GET.get('include_inactive') == 'true':

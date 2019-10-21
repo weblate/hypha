@@ -1,14 +1,19 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from django.core.exceptions import NON_FIELD_ERRORS
 
 from opentech.apply.utils.options import RICH_TEXT_WIDGET
+from opentech.apply.funds.models import ApplicationSubmission
 
 from .models import (
     Determination,
+    DeterminationFormSettings,
     DETERMINATION_CHOICES,
     TRANSITION_DETERMINATION,
 )
 from .utils import determination_actions
+
+User = get_user_model()
 
 
 class RichTextField(forms.CharField):
@@ -23,7 +28,65 @@ class RequiredRichTextField(forms.CharField):
     widget = RICH_TEXT_WIDGET
 
 
-class BaseDeterminationForm(forms.ModelForm):
+class BaseDeterminationForm:
+    def __init__(self, *args, user, initial, action, **kwargs):
+        if 'site' in kwargs:
+            site = kwargs.pop('site')
+            self.form_settings = DeterminationFormSettings.for_site(site)
+        try:
+            initial.update(outcome=TRANSITION_DETERMINATION[action])
+        except KeyError:
+            pass
+        initial.update(author=user.id)
+        super().__init__(*args, initial=initial, **kwargs)
+
+    def data_fields(self):
+        return []
+
+    def clean_outcome(self):
+        # Enforce outcome as an int
+        return int(self.cleaned_data['outcome'])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        cleaned_data['data'] = {
+            key: value
+            for key, value in cleaned_data.items()
+            if key in self.data_fields()
+        }
+        return cleaned_data
+
+    def apply_form_settings(self, application_type, fields):
+        for field in fields:
+            try:
+                self.fields[field].label = getattr(self.form_settings, f'{application_type}_{field}_label')
+            except AttributeError:
+                pass
+            try:
+                self.fields[field].help_text = getattr(self.form_settings, f'{application_type}_{field}_help_text')
+            except AttributeError:
+                pass
+        return fields
+
+    @classmethod
+    def get_detailed_response(cls, saved_data):
+        data = {}
+        for group, title in cls.titles.items():
+            data.setdefault(group, {'title': title, 'questions': list()})
+
+        for name, field in cls.base_fields.items():
+            try:
+                value = saved_data[name]
+            except KeyError:
+                # The field is not stored in the data
+                pass
+            else:
+                data[field.group]['questions'].append((field.label, str(value)))
+
+        return data
+
+
+class BaseNormalDeterminationForm(BaseDeterminationForm, forms.ModelForm):
     draft_button_name = "save_draft"
 
     class Meta:
@@ -42,42 +105,11 @@ class BaseDeterminationForm(forms.ModelForm):
             }
         }
 
-    def __init__(self, *args, user, submission, action='', initial={}, instance=None, **kwargs):
-        try:
-            initial.update(outcome=TRANSITION_DETERMINATION[action])
-        except KeyError:
-            pass
-        initial.update(submission=submission.id)
-        initial.update(author=user.id)
-
-        if instance:
-            for key, value in instance.data.items():
-                if key not in self._meta.fields:
-                    initial[key] = value
-
-        super().__init__(*args, initial=initial, instance=instance, **kwargs)
-
-        for field in self._meta.widgets:
-            self.fields[field].disabled = True
-
-        self.fields['outcome'].choices = self.outcome_choices_for_phase(submission, user)
-
-        if self.draft_button_name in self.data:
-            for field in self.fields.values():
-                field.required = False
-
-    def clean(self):
-        cleaned_data = super().clean()
-        cleaned_data['data'] = {
-            key: value
-            for key, value in cleaned_data.items()
-            if key not in self._meta.fields
-        }
-
-    def save(self, commit=True):
-        self.instance.is_draft = self.draft_button_name in self.data
-
-        return super().save(commit)
+    def data_fields(self):
+        return [
+            field for field in self.fields
+            if field not in self._meta.fields
+        ]
 
     def outcome_choices_for_phase(self, submission, user):
         """
@@ -98,25 +130,53 @@ class BaseDeterminationForm(forms.ModelForm):
 
         return available_choices
 
-    @classmethod
-    def get_detailed_response(cls, saved_data):
-        data = {}
-        for group, title in cls.titles.items():
-            data.setdefault(group, {'title': title, 'questions': list()})
+    def save(self, commit=True):
+        self.instance.is_draft = self.draft_button_name in self.data
 
-        for name, field in cls.base_fields.items():
-            try:
-                value = saved_data[name]
-            except KeyError:
-                # The field is not stored in the data
-                pass
-            else:
-                data[field.group]['questions'].append((field.label, str(value)))
-
-        return data
+        return super().save(commit)
 
 
-class ConceptDeterminationForm(BaseDeterminationForm):
+class BaseBatchDeterminationForm(BaseDeterminationForm, forms.Form):
+    submissions = forms.ModelMultipleChoiceField(
+        queryset=ApplicationSubmission.objects.all(),
+        widget=forms.ModelMultipleChoiceField.hidden_widget,
+    )
+    author = forms.ModelChoiceField(
+        queryset=User.objects.staff(),
+        widget=forms.ModelChoiceField.hidden_widget,
+        required=True,
+    )
+
+    def data_fields(self):
+        return [
+            field for field in self.fields
+            if field not in ['submissions', 'outcome', 'author']
+        ]
+
+    def _post_clean(self):
+        submissions = self.cleaned_data['submissions'].undetermined()
+        data = {
+            field: self.cleaned_data[field]
+            for field in ['author', 'data', 'outcome']
+        }
+
+        self.instances = [
+            Determination(
+                submission=submission,
+                **data,
+            )
+            for submission in submissions
+        ]
+
+        return super()._post_clean()
+
+    def save(self):
+        determinations = Determination.objects.bulk_create(self.instances)
+        self.instances = determinations
+        return determinations
+
+
+class BaseConceptDeterminationForm(forms.Form):
     titles = {
         1: 'Feedback',
     }
@@ -192,7 +252,7 @@ class ConceptDeterminationForm(BaseDeterminationForm):
     # TODO option to not send message, or resend
 
 
-class ProposalDeterminationForm(BaseDeterminationForm):
+class BaseProposalDeterminationForm(forms.Form):
     titles = {
         1: 'A. Determination',
         2: 'B. General thoughts',
@@ -273,3 +333,85 @@ class ProposalDeterminationForm(BaseDeterminationForm):
     # D. Rationale and appropriateness consideration
     rationale = RichTextField(label='Rationale and appropriateness questions and comments')
     rationale.group = 4
+
+
+class ConceptDeterminationForm(BaseConceptDeterminationForm, BaseNormalDeterminationForm):
+    def __init__(self, *args, submission, user, initial={}, instance=None, **kwargs):
+        initial.update(submission=submission.id)
+
+        if instance:
+            for key, value in instance.data.items():
+                if key not in self._meta.fields:
+                    initial[key] = value
+
+        super(BaseNormalDeterminationForm, self).__init__(*args, initial=initial, user=user, instance=instance, **kwargs)
+
+        for field in self._meta.widgets:
+            self.fields[field].disabled = True
+
+        self.fields['outcome'].choices = self.outcome_choices_for_phase(submission, user)
+
+        if self.draft_button_name in self.data:
+            for field in self.fields.values():
+                field.required = False
+
+        self.fields = self.apply_form_settings('concept', self.fields)
+
+        action = kwargs.get('action')
+        stages_num = len(submission.workflow.stages)
+
+        if stages_num > 1 and action == 'invited_to_proposal':
+            second_stage_forms = submission.get_from_parent('forms').filter(stage=2)
+            if second_stage_forms.count() > 1:
+                proposal_form_choices = [
+                    (index, form.form.name)
+                    for index, form in enumerate(second_stage_forms)
+                ]
+                self.fields['proposal_form'] = forms.ChoiceField(
+                    label='Proposal Form',
+                    choices=proposal_form_choices,
+                    help_text='Select the proposal form to use for proposal stage.',
+                )
+                self.fields['proposal_form'].group = 1
+                self.fields.move_to_end('proposal_form', last=False)
+
+
+class ProposalDeterminationForm(BaseProposalDeterminationForm, BaseNormalDeterminationForm):
+    def __init__(self, *args, submission, user, initial={}, instance=None, **kwargs):
+        initial.update(submission=submission.id)
+
+        if instance:
+            for key, value in instance.data.items():
+                if key not in self._meta.fields:
+                    initial[key] = value
+
+        super(BaseNormalDeterminationForm, self).__init__(*args, initial=initial, user=user, instance=instance, **kwargs)
+
+        for field in self._meta.widgets:
+            self.fields[field].disabled = True
+
+        self.fields['outcome'].choices = self.outcome_choices_for_phase(submission, user)
+
+        if self.draft_button_name in self.data:
+            for field in self.fields.values():
+                field.required = False
+
+        self.fields = self.apply_form_settings('proposal', self.fields)
+
+
+class BatchConceptDeterminationForm(BaseConceptDeterminationForm, BaseBatchDeterminationForm):
+    def __init__(self, *args, submissions, initial={}, **kwargs):
+        initial.update(submissions=submissions.values_list('id', flat=True))
+        super(BaseBatchDeterminationForm, self).__init__(*args, initial=initial, **kwargs)
+        self.fields['outcome'].widget = forms.HiddenInput()
+
+        self.fields = self.apply_form_settings('concept', self.fields)
+
+
+class BatchProposalDeterminationForm(BaseProposalDeterminationForm, BaseBatchDeterminationForm):
+    def __init__(self, *args, submissions, initial={}, **kwargs):
+        initial.update(submissions=submissions.values_list('id', flat=True))
+        super(BaseBatchDeterminationForm, self).__init__(*args, initial=initial, **kwargs)
+        self.fields['outcome'].widget = forms.HiddenInput()
+
+        self.fields = self.apply_form_settings('proposal', self.fields)

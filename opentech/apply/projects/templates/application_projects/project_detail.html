@@ -1,0 +1,267 @@
+{% extends "base-apply.html" %}
+
+{% load contract_tools %}
+{% load static  %}
+{% load wagtailcore_tags %}
+
+{% block title %}{{ object.title }}{% endblock %}
+
+{% block body_class %}{% endblock %}
+
+{% block content %}
+<div class="admin-bar">
+    <div class="admin-bar__inner">
+        <h1 class="beta heading heading--no-margin heading--bold">{{ object.title }}</h1>
+        <h5 class="heading heading--meta">
+
+            <span>
+                {% if public_page %}
+                <a class="link--transparent link--underlined" href="{% pageurl public_page %}" >
+                    {{ object.submission.page }}
+                </a>
+                {% else %}
+                {{ object.submission.page }}
+                {% endif %}
+            </span>
+
+            {% if request.user.is_apply_staff and object.submission.round %}
+            <span>
+                <a class="link--transparent link--underlined" href="{% url 'apply:rounds:detail' pk=object.submission.round.pk %}">{{ object.submission.round }}</a>
+            </span>
+            {% else %}
+                <span>{{ object.submission.round }}</span>
+            {% endif %}
+
+            <span>Lead: {{ object.lead }}</span>
+
+        </h5>
+
+        <div class="status-bar">
+            {% for status, text in statuses %}
+                {% if forloop.counter0 == current_status_index %}
+                    {% include "funds/includes/status_bar_item.html" with is_current=True is_complete=False label=text %}
+                {% elif forloop.counter0 < current_status_index %}
+                    {% include "funds/includes/status_bar_item.html" with is_current=False is_complete=True label=text %}
+                {% else %}
+                    {% include "funds/includes/status_bar_item.html" with is_current=False is_complete=False label=text %}
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="status-bar--mobile">
+            <h6 class="status-bar__subheading">
+                {{ object.get_status_display }}
+            </h6>
+        </div>
+
+        <div class="tabs js-tabs">
+            <div class="tabs__container">
+                <a class="tab__item" href="#details" data-tab="tab-1">
+                    Details
+                </a>
+
+                <a class="tab__item" href="#communications" data-tab="tab-2">
+                    Communications
+                </a>
+
+                <a class="tab__item" href="#activity-feed" data-tab="tab-3">
+                    Activity Feed
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="wrapper wrapper--large wrapper--tabs js-tabs-content">
+    <div class="tabs__content" id="tab-1">
+        {% block notifications %}
+        {% endblock %}
+        <div class="wrapper wrapper--sidebar">
+            <article class="wrapper--sidebar--inner">
+                <h3>Project Information</h3>
+                <div class="grid grid--proposal-info">
+                    <div>
+                        <h5>Proposed start date</h5>
+                        <p>{{ object.proposed_start|date:"j F Y"|default:"-" }}</p>
+                    </div>
+
+                    <div>
+                        <h5>Project Proposed end date</h5>
+                        <p>{{ object.proposed_end|date:"j F Y"|default:"-" }}</p>
+                    </div>
+
+                    <div>
+                        <h5>Legal name</h5>
+                        <p>{{ object.contact_legal_name|default:"-" }}</p>
+                    </div>
+
+                    <div>
+                        <h5>Email</h5>
+                        {% if object.contact_email %}
+                        <a href="mailto:{{ object.contact_email }}">{{ object.contact_email }}</a>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </div>
+                </div>
+
+                <a class="link--reveal-proposal js-toggle-propsoal-info" href="#">Show more</a>
+
+                <div class="rich-text--hidden js-rich-text-hidden">
+                    <div>
+                        <h5>Address</h5>
+                        <p>{{ object.get_address_display|default:"-"}}</p>
+                    </div>
+
+                    <div>
+                        <h5>Phone</h5>
+                        <p>{{ object.phone|default:"-" }}</p>
+                    </div>
+
+                    <div>
+                        <h5>Value</h5>
+                        <p>${{ object.value|default:"-" }}</p>
+                    </div>
+                </div>
+
+                {% if object.can_request_funding %}
+                <div class="wrapper wrapper--outer-space-large">
+                    {% include "application_projects/includes/funding_block.html" %}
+                    {% include "application_projects/includes/payment_requests.html" %}
+                </div>
+                {% endif %}
+
+                {% if not object.is_in_progress %}
+                {% include "application_projects/includes/supporting_documents.html" %}
+                {% endif %}
+            </article>
+
+            <aside class="sidebar">
+                {% if mobile %}
+                <a class="js-actions-toggle button button--white button--full-width button--actions">Actions to take</a>
+                {% endif %}
+
+                <div class="js-actions-sidebar sidebar__inner sidebar__inner--light-blue sidebar__inner--actions {% if mobile %}sidebar__inner--mobile{% endif %}">
+
+                    <h5>Actions to take</h5>
+
+                    {% if request.user.is_apply_staff %}
+                    {% block admin_actions %}{% endblock %}
+                    {% endif %}
+
+                    {% user_can_upload_contract object request.user as can_upload_contract %}
+                    {% if can_upload_contract %}
+                    <div class="modal" id="upload-contract">
+                        {% if not user.is_staff %}
+                            <h4 class="modal__header-bar">Upload Signed Contract</h4>
+                        {% else %}
+                            <h4 class="modal__header-bar">Upload Contract</h4>
+                        {% endif %}
+                        {% include 'funds/includes/delegated_form_base.html' with form=contract_form value='Upload'%}
+                    </div>
+
+                    <a data-fancybox
+                       data-src="#upload-contract"
+                       class="button button--primary button--full-width button--bottom-space"
+                       href="#">
+                        Upload contract
+                    </a>
+                    {% endif %}
+
+                    {% if object.can_request_funding %}
+                    <a class="button button--primary button--bottom-space button--full-width"
+                       href="{% url "apply:projects:request" pk=object.pk %}">
+                        Add payment request
+                    </a>
+                    {% endif %}
+
+                    {% if request.user.is_apply_staff %}
+                    {% block admin_assignments %}{% endblock %}
+                    {% endif %}
+
+                </div>
+
+                {% if object.is_in_progress %}
+                <div class="sidebar__inner">
+                    <h5>Supporting Information</h5>
+
+                    <p><a class="link link--bold" href="{{ object.submission.get_absolute_url }}">Proposal</a></p>
+
+                    {% if request.user.is_apply_staff %}
+                    <p><a class="link link--bold" href="{% url 'apply:projects:simplified' pk=project.pk %}">Approval form</a></p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if request.user.is_apply_staff and approvals %}
+                {% block project_approvals %}{% endblock %}
+                {% endif %}
+
+                {% if contracts or contract_to_sign or contract_to_approve %}
+                <div class="sidebar__inner">
+                    <h5>Contracts</h5>
+
+                    {% block approve_contract %}
+                        {% if contract_to_approve %}
+                        <p>
+                            <a href="{{ contract_to_approve.file.url }}" class="link link--bold">
+                                {{ contract_to_approve.created_at|date:"j F Y" }}
+                            </a>
+                            (Signed)
+                        </p>
+                        {% endif %}
+                    {% endblock %}
+
+                    {% block sign_contract %}
+                        {% if contract_to_sign%}
+                        <p>
+                            <a href="{{ contract_to_sign.file.url }}" class="link link--bold">
+                                {{ contract_to_sign.created_at|date:"j F Y" }}
+                            </a>
+                            (Unsigned)
+                        </p>
+                        {% endif %}
+                    {% endblock %}
+
+                    {% for contract in contracts %}
+                    <p>
+                        <a href="{{ contract.file.url }}" class="link link--bold">
+                            {{ contract.created_at|date:"j F Y" }}
+                        </a>
+                            - Approved by {{ contract.approver }}
+                    </p>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </aside>
+        </div>
+    </div>
+
+    {# Tab 2 #}
+    <div class="tabs__content" id="tab-2">
+        <div class="feed">
+            {% include "activity/include/comment_form.html" %}
+            {% include "activity/include/comment_list.html" with editable=True %}
+        </div>
+    </div>
+
+    {# Tab 3 #}
+    <div class="tabs__content" id="tab-3">
+        <div class="feed">
+            {% include "activity/include/action_list.html" %}
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/apply/fancybox.css' %}">
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/apply/tabs.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-payment-block.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-proposal-info.js' %}"></script>
+    <script src="{% static 'js/apply/file-uploads.js' %}"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/fancybox/3.4.1/jquery.fancybox.min.js"></script>
+{% endblock %}

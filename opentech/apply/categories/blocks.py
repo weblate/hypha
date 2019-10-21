@@ -1,5 +1,5 @@
 from django import forms
-from django.utils.functional import cached_property
+from django.utils.functional import cached_property, SimpleLazyObject
 from django.utils.translation import ugettext_lazy as _
 
 from wagtail.core.blocks import BooleanBlock, CharBlock, ChooserBlock, TextBlock
@@ -19,6 +19,10 @@ class ModelChooserBlock(ChooserBlock):
     @cached_property
     def target_model(self):
         return resolve_model_string(self._target_model)
+
+    def to_python(self, value):
+        super_method = super().to_python
+        return SimpleLazyObject(lambda: super_method(value))
 
 
 class CategoryQuestionBlock(OptionalFormFieldBlock):
@@ -74,14 +78,14 @@ class CategoryQuestionBlock(OptionalFormFieldBlock):
         else:
             return forms.RadioSelect
 
-    def render(self, value, context):
-        data = context['data']
+    def prepare_data(self, value, data, serialize):
         category = value['category']
-        context['data'] = category.options.filter(id__in=data).values_list('value', flat=True)
-        return super().render(value, context)
+        if data:
+            data = category.options.filter(id__in=data).values_list('value', flat=True)
+        return data
 
     def get_searchable_content(self, value, data):
         return None
 
     def no_response(self):
-        return None
+        return ['No Response']

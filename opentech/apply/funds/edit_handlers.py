@@ -65,7 +65,12 @@ class ReadOnlyPanel(EditHandler):
         if callable(value):
             value = value()
 
-        self.form.initial[self.attr] = value
+        # Add initial value only when an object is present. Display nothing when a new page is being
+        # created. As it is a read-only panel and creates confusion when default values are displayed.
+        if self.instance.id:
+            self.form.initial[self.attr] = value
+        else:
+            self.form.initial[self.attr] = '-'
         self.bound_field = DisplayField().get_bound_field(self.form, self.attr)
         return {
             'self': self,
@@ -108,7 +113,7 @@ class FilteredFieldPanel(FieldPanel):
             filter_query=self.filter_query,
         )
 
-    def on_instance_bound(self):
-        super().on_instance_bound()
+    def on_form_bound(self):
+        super().on_form_bound()
         target_model = self.bound_field.field.queryset.model
         self.bound_field.field.queryset = target_model.objects.filter(**self.filter_query)

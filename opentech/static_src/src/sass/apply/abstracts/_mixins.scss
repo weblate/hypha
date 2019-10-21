@@ -41,25 +41,20 @@
     -webkit-overflow-scrolling: touch; // sass-lint:disable-line no-misspelled-properties
 }
 
-// Output a rem and px fallback value for the given property
+// Output a rem value for the given property
 @mixin rem($property, $values) {
 
-    $px:  ();
     $rem: ();
 
     @each $value in $values {
         @if $value == 0 or $value == auto or $value == inherit {
-            $px:  append($px, $value);
             $rem: append($rem, $value);
-        } @else {
-            $px:  append($px, $value);
+        }
+        @else {
             $rem: append($rem, rem(strip-unit($value)));
         }
     }
-    // sass-lint:disable no-duplicate-properties
-    #{$property}: $px;
     #{$property}: $rem;
-    // sass-lint:enddisable
 }
 
 // Output a `font-size: [x]rem;` declaration for the given px value
@@ -73,7 +68,8 @@
 
     @if $size == null {
         @warn 'Font size ‘#{$keyword}’ does not exist';
-    } @else {
+    }
+    @else {
         @include rem-font-size($size);
     }
 }
@@ -81,7 +77,7 @@
 // Button mixin
 @mixin button($bg, $hover-bg) {
     width: 100%;
-    padding: 10px 60px;
+    padding: .5em 60px;
     font-weight: $weight--bold;
     color: $color--white;
     text-align: center;
@@ -113,7 +109,7 @@
 // Viewport sized typography mixin that takes a min and max pixel-based value
 @mixin responsive-font-sizes($min, $max) {
 
-    $vw-context: (1260 * 0.1) * 1px;
+    $vw-context: (1260 * .1) * 1px;
     $responsive: ($max / $vw-context) * 10vw;
 
     $responsive-unitless: $responsive / ($responsive - $responsive + 1);
@@ -152,9 +148,96 @@
     @if $direction == top or $direction == bottom {
         border-right:  $perpendicular-borders;
         border-left:   $perpendicular-borders;
-    } @else if $direction == right or $direction == left {
+    }
+    @else if $direction == right or $direction == left {
         border-top:    $perpendicular-borders;
         border-bottom: $perpendicular-borders;
     }
   }
 
+// used for the submission list items in the react app
+@mixin submission-list-item {
+    border-bottom: 2px solid $color--light-mid-grey;
+    border-right: 2px solid $color--light-mid-grey;
+}
+
+// ie11-specific css
+@mixin target-ie11 {
+    @media all and (-ms-high-contrast: none), (-ms-high-contrast: active) {
+        @content;
+    }
+}
+
+// ms-edge specific css
+@mixin target-edge {
+    @supports (-ms-ime-align: auto) {
+        @content;
+    }
+}
+
+@mixin table-ordering-styles {
+    thead {
+        th {
+            // ordering
+            &.desc,
+            &.asc {
+                position: relative;
+                color: $color--dark-grey;
+
+                &::after {
+                    position: absolute;
+                    top: 32px;
+                    margin-left: 3px;
+                }
+
+                a {
+                    color: inherit;
+                }
+            }
+
+            &.desc {
+                &::after {
+                    @include triangle(top, $color--default, 5px);
+                }
+            }
+
+            &.asc {
+                &::after {
+                    @include triangle(bottom, $color--default, 5px);
+                }
+            }
+        }
+    }
+}
+
+@mixin column-scrolling {
+    @include media-query(tablet-landscape) {
+        height: calc(100vh - var(--header-admin-height) - #{$listing-header-height});
+        overflow-y: scroll;
+    }
+
+    @include media-query(laptop-short) {
+        // allow for vertical scrolling on laptops
+        height: calc(100vh -  #{$listing-header-height});
+    }
+}
+
+@mixin table-checkbox {
+    input[type='checkbox'] {
+        margin: 0 auto;
+        display: block;
+        width: 20px;
+        height: 20px;
+        border: 1px solid $color--mid-grey;
+        -webkit-appearance: none; // sass-lint:disable-line no-vendor-prefixes
+        -moz-appearance: none; // sass-lint:disable-line no-vendor-prefixes
+        appearance: none;
+        background-color: $color--white;
+
+        &:checked {
+            background: url('./../../images/tick.svg') $color--dark-blue center no-repeat;
+            background-size: 12px;
+            border: 1px solid $color--dark-blue;
+        }
+    }
+}

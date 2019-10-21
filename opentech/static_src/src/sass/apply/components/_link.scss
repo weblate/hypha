@@ -1,10 +1,33 @@
 .link {
+    &:disabled,
+    &.is-disabled {
+        pointer-events: none;
+        opacity: .5;
+    }
+
+    &--button {
+        @include button($color--light-blue, $color--dark-blue);
+        display: inline-block;
+
+        &--narrow {
+            @include button--narrow;
+        }
+    }
+
     &--underlined {
         text-decoration: underline;
     }
 
+    &--transparent {
+        color: $color--white;
+    }
+
     &--bold {
         font-weight: $weight--bold;
+    }
+
+    &--left-space {
+        margin-left: 20px;
     }
 
     &--download {
@@ -16,10 +39,6 @@
         color: $color--white;
         background: $color--light-blue;
         transition: background-color, $transition;
-
-        @include media-query(mob-landscape) {
-            max-width: 300px;
-        }
 
         &:focus,
         &:hover {
@@ -45,7 +64,7 @@
             }
 
             &:last-child {
-                width: 12px;
+                width: 15px;
                 height: 18px;
                 stroke: $color--white;
             }
@@ -75,6 +94,14 @@
         }
     }
 
+    &--button-long-text {
+        padding: 10px;
+
+        @include media-query(tablet-portrait) {
+            padding: 10px 60px;
+        }
+    }
+
     &--open-feed {
         position: fixed;
         right: 20px;
@@ -86,6 +113,10 @@
         height: 60px;
         color: $color--white;
         background: url('./../../images/speech-bubble-blue.svg') no-repeat center;
+
+        .app-open & {
+            display: none;
+        }
 
         @include media-query(tablet-portrait) {
             @include button($color--light-blue, $color--dark-blue);
@@ -102,11 +133,13 @@
                 height: 30px;
                 margin-left: 30px;
                 font-size: 30px;
-                line-height: 0.9;
-                text-align: center;
-                border: 2px solid white;
+                border: 2px solid $color--white;
                 border-radius: 50%;
                 content: '+';
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding-bottom: 4px;
             }
         }
 
@@ -135,11 +168,13 @@
             height: 30px;
             margin-left: 10px;
             font-size: 30px;
-            line-height: 0.1;
-            text-align: center;
-            border: 2px solid white;
+            border: 2px solid $color--white;
             border-radius: 50%;
-            content: '_';
+            content: '\2013';
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-bottom: 5px;
 
             @include media-query(tablet-portrait) {
                 margin-left: 20px;
@@ -157,6 +192,7 @@
         color: $color--black-50;
         opacity: 0;
         transition: opacity $transition;
+        pointer-events: none;
 
         @include media-query(tablet-portrait) {
             right: 30px;
@@ -165,10 +201,12 @@
 
         &.is-visible {
             opacity: 1;
+            pointer-events: all;
         }
     }
 
-    &--edit-submission {
+    &--edit-submission,
+    &--delete-submission {
         display: flex;
         align-items: center;
         font-weight: $weight--bold;
@@ -176,10 +214,6 @@
 
         &:hover {
             cursor: not-allowed;
-        }
-
-        @include media-query(tablet-landscape) {
-            margin-left: auto;
         }
 
         &.is-active {
@@ -191,8 +225,39 @@
         }
     }
 
+    &--delete-submission {
+        margin-right: 1rem;
+        padding-right: 1rem;
+        border-right: 2px solid $color--mid-grey;
+
+        &:only-child {
+            border-right: 0;
+            padding-right: 0;
+            margin-right: 0;
+        }
+    }
+
     &--toggle-reviewers {
         display: block;
         margin: 0 10px 30px;
+    }
+
+    &--reveal-proposal {
+        display: flex;
+        align-items: center;
+        margin: 0 0 1rem;
+
+        &::before {
+            @include triangle(top, $color--dark-blue, 7px);
+            margin-right: .7rem;
+            transition: transform $transition;
+            transform: rotate(180deg);
+        }
+
+        &.is-open {
+            &::before {
+                transform: rotate(0);
+            }
+        }
     }
 }

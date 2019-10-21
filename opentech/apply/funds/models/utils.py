@@ -12,14 +12,22 @@ from wagtail.contrib.forms.models import AbstractEmailForm
 
 from opentech.apply.activity.messaging import messenger, MESSAGES
 from opentech.apply.stream_forms.models import AbstractStreamForm
-from opentech.apply.users.groups import REVIEWER_GROUP_NAME, STAFF_GROUP_NAME
+from opentech.apply.users.groups import REVIEWER_GROUP_NAME, STAFF_GROUP_NAME, PARTNER_GROUP_NAME, COMMUNITY_REVIEWER_GROUP_NAME
 
 from ..workflow import WORKFLOWS
 
 
+REVIEW_GROUPS = [
+    STAFF_GROUP_NAME,
+    REVIEWER_GROUP_NAME,
+    COMMUNITY_REVIEWER_GROUP_NAME,
+    PARTNER_GROUP_NAME,
+]
 LIMIT_TO_STAFF = {'groups__name': STAFF_GROUP_NAME}
 LIMIT_TO_REVIEWERS = {'groups__name': REVIEWER_GROUP_NAME}
-LIMIT_TO_STAFF_AND_REVIEWERS = {'groups__name__in': [STAFF_GROUP_NAME, REVIEWER_GROUP_NAME]}
+LIMIT_TO_PARTNERS = {'groups__name': PARTNER_GROUP_NAME}
+LIMIT_TO_COMMUNITY_REVIEWERS = {'groups__name': COMMUNITY_REVIEWER_GROUP_NAME}
+LIMIT_TO_REVIEWER_GROUPS = {'groups__name__in': REVIEW_GROUPS}
 
 
 def admin_url(page):
@@ -75,12 +83,12 @@ class WorkflowStreamForm(WorkflowHelpers, AbstractStreamForm):  # type: ignore
     class Meta:
         abstract = True
 
-    def get_defined_fields(self, stage=None):
+    def get_defined_fields(self, stage=None, form_index=0):
         if not stage:
-            form_index = 0
+            stage_num = 1
         else:
-            form_index = self.workflow.stages.index(stage)
-        return self.forms.all()[form_index].fields
+            stage_num = self.workflow.stages.index(stage) + 1
+        return self.forms.filter(stage=stage_num)[form_index].fields
 
     def render_landing_page(self, request, form_submission=None, *args, **kwargs):
         # We only reach this page after creation of a new submission
@@ -89,7 +97,7 @@ class WorkflowStreamForm(WorkflowHelpers, AbstractStreamForm):  # type: ignore
             MESSAGES.NEW_SUBMISSION,
             request=request,
             user=form_submission.user,
-            submission=form_submission,
+            source=form_submission,
         )
         return super().render_landing_page(request, form_submission=None, *args, **kwargs)
 

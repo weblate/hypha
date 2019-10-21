@@ -1,26 +1,42 @@
-from datetime import datetime, timedelta
-import json
+from datetime import timedelta
 
-from opentech.apply.activity.models import Activity
+from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.text import slugify
+
+from opentech.apply.activity.models import Activity, TEAM
+from opentech.apply.projects.models import Project
+from opentech.apply.projects.tests.factories import ProjectFactory
 from opentech.apply.determinations.tests.factories import DeterminationFactory
 from opentech.apply.funds.tests.factories import (
     ApplicationSubmissionFactory,
     ApplicationRevisionFactory,
+    AssignedWithRoleReviewersFactory,
+    AssignedReviewersFactory,
     InvitedToProposalFactory,
     LabSubmissionFactory,
+    ReviewerRoleFactory,
+    ScreeningStatusFactory,
     SealedRoundFactory,
     SealedSubmissionFactory,
 )
-from opentech.apply.stream_forms.testing.factories import flatten_for_form
+from opentech.apply.review.tests.factories import ReviewFactory
 from opentech.apply.users.tests.factories import (
     ReviewerFactory,
     StaffFactory,
     SuperUserFactory,
-    UserFactory,
+    ApplicantFactory,
 )
+from opentech.apply.utils.testing import make_request
 from opentech.apply.utils.testing.tests import BaseViewTestCase
 
-from ..models import ApplicationRevision
+from ..models import ApplicationRevision, ApplicationSubmission
+from ..views import SubmissionDetailSimplifiedView
+from .factories import CustomFormFieldsFactory
 
 
 def prepare_form_data(submission, **kwargs):
@@ -31,22 +47,7 @@ def prepare_form_data(submission, **kwargs):
         field_id = submission.field(field).id
         data[field_id] = value
 
-    address_field = submission.must_include['address']
-    address = data.pop(address_field)
-    data.update(**prepare_address(address, address_field))
-
-    return data
-
-
-def prepare_address(address, field):
-    address = json.loads(address)
-    address['locality'] = {
-        'localityname': address.pop('localityname'),
-        'administrativearea': address.pop('administrativearea'),
-        'postalcode': address.pop('postalcode'),
-    }
-    address = flatten_for_form(address, field, number=True)
-    return address
+    return CustomFormFieldsFactory.form_response(submission.form_fields, data)
 
 
 class BaseSubmissionViewTestCase(BaseViewTestCase):
@@ -78,7 +79,7 @@ class TestStaffSubmissionView(BaseSubmissionViewTestCase):
         self.assertContains(response, submission.title)
 
     def test_can_progress_phase(self):
-        next_status = list(self.submission.get_actions_for_user(self.user))[0][0]
+        next_status = 'internal_review'
         self.post_page(self.submission, {'form-submitted-progress_form': '', 'action': next_status})
 
         submission = self.refresh(self.submission)
@@ -91,6 +92,23 @@ class TestStaffSubmissionView(BaseSubmissionViewTestCase):
         # Invited for proposal is a a determination, so this will redirect to the determination form.
         url = self.url_from_pattern('funds:submissions:determinations:form', kwargs={'submission_pk': submission.id})
         self.assertRedirects(response, f"{url}?action=invited_to_proposal")
+
+    def test_new_form_after_progress(self):
+        submission = ApplicationSubmissionFactory(status='invited_to_proposal', workflow_stages=2, lead=self.user)
+        stage = submission.stage
+        DeterminationFactory(submission=submission, accepted=True)
+
+        request = make_request(self.user, method='get', site=submission.page.get_site())
+        submission.progress_stage_when_possible(self.user, request)
+
+        submission = self.refresh(submission)
+        new_stage = submission.stage
+
+        self.assertNotEqual(stage, new_stage)
+
+        get_forms = submission.get_from_parent('get_defined_fields')
+        self.assertEqual(submission.form_fields, get_forms(new_stage))
+        self.assertNotEqual(submission.form_fields, get_forms(stage))
 
     def test_cant_progress_stage_if_not_lead(self):
         submission = ApplicationSubmissionFactory(status='concept_review_discussion', workflow_stages=2)
@@ -157,6 +175,37 @@ class TestStaffSubmissionView(BaseSubmissionViewTestCase):
         self.assertEqual(old_status, submission.status)
         self.assertEqual(new_title, submission.title)
 
+    def test_not_included_fields_render(self):
+        submission = ApplicationSubmissionFactory(form_fields__exclude__value=True)
+        response = self.get_page(submission)
+        self.assertNotContains(response, 'Value')
+
+    def test_can_screen_submission(self):
+        screening_outcome = ScreeningStatusFactory()
+        self.post_page(self.submission, {'form-submitted-screening_form': '', 'screening_status': screening_outcome.id})
+        submission = self.refresh(self.submission)
+        self.assertEqual(submission.screening_status, screening_outcome)
+
+    def test_can_view_submission_screening_block(self):
+        response = self.get_page(self.submission)
+        self.assertContains(response, 'Screening Status')
+
+    def test_can_create_project(self):
+        # check submission doesn't already have a Project
+        with self.assertRaisesMessage(Project.DoesNotExist, 'ApplicationSubmission has no project.'):
+            self.submission.project
+
+        self.post_page(self.submission, {
+            'form-submitted-project_form': '',
+            'submission': self.submission.id,
+        })
+
+        project = Project.objects.order_by('-pk').first()
+        submission = ApplicationSubmission.objects.get(pk=self.submission.pk)
+
+        self.assertTrue(hasattr(submission, 'project'))
+        self.assertEquals(submission.project.id, project.id)
+
 
 class TestReviewersUpdateView(BaseSubmissionViewTestCase):
     user_factory = StaffFactory
@@ -166,36 +215,37 @@ class TestReviewersUpdateView(BaseSubmissionViewTestCase):
         super().setUpTestData()
         cls.staff = StaffFactory.create_batch(4)
         cls.reviewers = ReviewerFactory.create_batch(4)
+        cls.roles = ReviewerRoleFactory.create_batch(2)
 
-    def post_form(self, submission, staff=list(), reviewers=list()):
-        return self.post_page(submission, {
+    def post_form(self, submission, reviewer_roles=list(), reviewers=list()):
+        data = {
             'form-submitted-reviewer_form': '',
-            'staff_reviewers': [s.id for s in staff],
             'reviewer_reviewers': [r.id for r in reviewers]
-        })
+        }
+        data.update(
+            **{
+                f'role_reviewer_{slugify(str(role))}': reviewer.id
+                for role, reviewer in zip(self.roles, reviewer_roles)
+            }
+        )
+        return self.post_page(submission, data)
 
     def test_lead_can_add_staff_single(self):
         submission = ApplicationSubmissionFactory(lead=self.user)
 
-        self.post_form(submission, self.staff)
+        self.post_form(submission, reviewer_roles=[self.staff[0]])
 
-        self.assertCountEqual(submission.reviewers.all(), self.staff)
+        self.assertCountEqual(submission.reviewers.all(), [self.staff[0]])
 
-    def test_lead_can_remove_staff_single(self):
-        submission = ApplicationSubmissionFactory(lead=self.user, reviewers=self.staff)
-        self.assertCountEqual(submission.reviewers.all(), self.staff)
+    def test_lead_can_change_staff_single(self):
+        submission = ApplicationSubmissionFactory(lead=self.user)
+        AssignedWithRoleReviewersFactory(role=self.roles[0], submission=submission, reviewer=self.staff[0])
+        self.assertCountEqual(submission.reviewers.all(), [self.staff[0]])
 
-        self.post_form(submission, [])
+        self.post_form(submission, reviewer_roles=[self.staff[1]])
 
-        self.assertCountEqual(submission.reviewers.all(), [])
-
-    def test_lead_can_remove_some_staff(self):
-        submission = ApplicationSubmissionFactory(lead=self.user, reviewers=self.staff)
-        self.assertCountEqual(submission.reviewers.all(), self.staff)
-
-        self.post_form(submission, self.staff[0:2])
-
-        self.assertCountEqual(submission.reviewers.all(), self.staff[0:2])
+        self.assertCountEqual(submission.reviewers.all(), [self.staff[1]])
+        self.assertEqual(submission.assigned.with_roles().first().reviewer, self.staff[1])
 
     def test_lead_cant_add_reviewers_single(self):
         submission = ApplicationSubmissionFactory(lead=self.user)
@@ -204,43 +254,28 @@ class TestReviewersUpdateView(BaseSubmissionViewTestCase):
 
         self.assertCountEqual(submission.reviewers.all(), [])
 
-    def test_lead_can_add_staff_and_reviewers_for_proposal(self):
+    def test_lead_can_add_reviewers_for_proposal(self):
         submission = InvitedToProposalFactory(lead=self.user)
 
-        self.post_form(submission, self.staff, self.reviewers)
+        self.post_form(submission, reviewers=self.reviewers)
 
-        self.assertCountEqual(submission.reviewers.all(), self.staff + self.reviewers)
+        self.assertCountEqual(submission.reviewers.all(), self.reviewers)
 
-    def test_lead_can_remove_staff_and_reviewers_for_proposal(self):
-        submission = InvitedToProposalFactory(lead=self.user, reviewers=self.staff + self.reviewers)
-        self.assertCountEqual(submission.reviewers.all(), self.staff + self.reviewers)
+    def test_lead_can_remove_reviewers_for_proposal(self):
+        submission = InvitedToProposalFactory(lead=self.user, reviewers=self.reviewers)
+        self.assertCountEqual(submission.reviewers.all(), self.reviewers)
 
         self.post_form(submission)
 
         self.assertCountEqual(submission.reviewers.all(), [])
 
-    def test_lead_can_remove_some_staff_and_reviewers_for_proposal(self):
-        submission = InvitedToProposalFactory(lead=self.user, reviewers=self.staff + self.reviewers)
-        self.assertCountEqual(submission.reviewers.all(), self.staff + self.reviewers)
+    def test_lead_can_remove_some_reviewers_for_proposal(self):
+        submission = InvitedToProposalFactory(lead=self.user, reviewers=self.reviewers)
+        self.assertCountEqual(submission.reviewers.all(), self.reviewers)
 
-        self.post_form(submission, self.staff[0:2], self.reviewers[0:2])
+        self.post_form(submission, reviewers=self.reviewers[0:2])
 
-        self.assertCountEqual(submission.reviewers.all(), self.staff[0:2] + self.reviewers[0:2])
-
-    def test_staff_can_add_staff_single(self):
-        submission = ApplicationSubmissionFactory()
-
-        self.post_form(submission, self.staff)
-
-        self.assertCountEqual(submission.reviewers.all(), self.staff)
-
-    def test_staff_can_remove_staff_single(self):
-        submission = ApplicationSubmissionFactory(reviewers=self.staff)
-        self.assertCountEqual(submission.reviewers.all(), self.staff)
-
-        self.post_form(submission, [])
-
-        self.assertCountEqual(submission.reviewers.all(), [])
+        self.assertCountEqual(submission.reviewers.all(), self.reviewers[0:2])
 
     def test_staff_cant_add_reviewers_proposal(self):
         submission = ApplicationSubmissionFactory()
@@ -257,9 +292,50 @@ class TestReviewersUpdateView(BaseSubmissionViewTestCase):
 
         self.assertCountEqual(submission.reviewers.all(), self.reviewers)
 
+    def test_lead_can_change_role_reviewer_and_review_remains(self):
+        submission = ApplicationSubmissionFactory()
+        AssignedWithRoleReviewersFactory(role=self.roles[0], submission=submission, reviewer=self.staff[0])
+
+        # Add a review from that staff reviewer
+        ReviewFactory(submission=submission, author__reviewer=self.staff[0], author__staff=True)
+
+        # Assign a different reviewer to the same role
+        self.post_form(submission, reviewer_roles=[self.staff[1]])
+
+        # Make sure that the ex-role-reviewer is still assigned record
+        self.assertCountEqual(submission.reviewers.all(), self.staff[0:2])
+
+    def test_can_be_made_role_and_not_duplciated(self):
+        submission = ApplicationSubmissionFactory()
+
+        ReviewFactory(submission=submission, author__reviewer=self.staff[0], author__staff=True)
+
+        self.post_form(submission, reviewer_roles=[self.staff[0]])
+        self.assertCountEqual(submission.reviewers.all(), [self.staff[0]])
+
+    def test_can_remove_external_reviewer_and_review_remains(self):
+        submission = InvitedToProposalFactory(lead=self.user)
+        reviewer = self.reviewers[0]
+        AssignedReviewersFactory(submission=submission, reviewer=reviewer)
+        ReviewFactory(submission=submission, author__reviewer=reviewer)
+
+        self.post_form(submission, reviewers=[])
+
+        self.assertCountEqual(submission.reviewers.all(), [reviewer])
+
+    def test_can_add_external_reviewer_and_review_remains(self):
+        submission = InvitedToProposalFactory(lead=self.user)
+        reviewer = self.reviewers[0]
+        AssignedReviewersFactory(submission=submission, reviewer=reviewer)
+        ReviewFactory(submission=submission, author__reviewer=reviewer)
+
+        self.post_form(submission, reviewers=[self.reviewers[1]])
+
+        self.assertCountEqual(submission.reviewers.all(), [reviewer, self.reviewers[1]])
+
 
 class TestApplicantSubmissionView(BaseSubmissionViewTestCase):
-    user_factory = UserFactory
+    user_factory = ApplicantFactory
 
     @classmethod
     def setUpTestData(cls):
@@ -336,9 +412,24 @@ class TestApplicantSubmissionView(BaseSubmissionViewTestCase):
         response = self.get_page(submission, 'edit')
         self.assertEqual(response.status_code, 403)
 
+    def test_cant_screen_submission(self):
+        """
+        Test that an applicant cannot set the screening status
+        and that they don't see the screening status form.
+        """
+        screening_outcome = ScreeningStatusFactory()
+        response = self.post_page(self.submission, {'form-submitted-screening_form': '', 'screening_status': screening_outcome.id})
+        self.assertNotIn('screening_form', response.context_data)
+        submission = self.refresh(self.submission)
+        self.assertNotEqual(submission.screening_status, screening_outcome)
+
+    def test_cant_see_screening_status_block(self):
+        response = self.get_page(self.submission)
+        self.assertNotContains(response, 'Screening Status')
+
 
 class TestRevisionsView(BaseSubmissionViewTestCase):
-    user_factory = UserFactory
+    user_factory = ApplicantFactory
 
     def test_create_revisions_on_submit(self):
         submission = ApplicationSubmissionFactory(status='draft_proposal', workflow_stages=2, user=self.user)
@@ -351,6 +442,7 @@ class TestRevisionsView(BaseSubmissionViewTestCase):
 
         submission = self.refresh(submission)
 
+        self.maxDiff = None
         self.assertEqual(submission.status, 'proposal_discussion')
         self.assertEqual(submission.revisions.count(), 2)
         self.assertDictEqual(submission.revisions.last().form_data, old_data)
@@ -368,6 +460,7 @@ class TestRevisionsView(BaseSubmissionViewTestCase):
 
         submission = self.refresh(submission)
 
+        self.maxDiff = None
         self.assertEqual(submission.status, 'draft_proposal')
         self.assertEqual(submission.revisions.count(), 2)
         self.assertDictEqual(submission.draft_revision.form_data, submission.from_draft().form_data)
@@ -389,9 +482,9 @@ class TestRevisionsView(BaseSubmissionViewTestCase):
         submission = self.refresh(submission)
 
         self.maxDiff = None
-        self.assertEqual(submission.revisions.count(), 2)
         self.assertDictEqual(submission.draft_revision.form_data, submission.from_draft().form_data)
         self.assertDictEqual(submission.live_revision.form_data, submission.form_data)
+        self.assertEqual(submission.revisions.count(), 2)
 
         self.assertEqual(submission.title, newer_title)
 
@@ -440,10 +533,10 @@ class TestRevisionList(BaseSubmissionViewTestCase):
         submission = ApplicationSubmissionFactory()
 
         revision = ApplicationRevisionFactory(submission=submission)
-        ApplicationRevision.objects.filter(id=revision.id).update(timestamp=datetime.now() - timedelta(days=1))
+        ApplicationRevision.objects.filter(id=revision.id).update(timestamp=timezone.now() - timedelta(days=1))
 
         revision_older = ApplicationRevisionFactory(submission=submission)
-        ApplicationRevision.objects.filter(id=revision_older.id).update(timestamp=datetime.now() - timedelta(days=2))
+        ApplicationRevision.objects.filter(id=revision_older.id).update(timestamp=timezone.now() - timedelta(days=2))
 
         response = self.get_page(submission)
 
@@ -524,3 +617,121 @@ class TestSuperUserSealedView(BaseSubmissionViewTestCase):
         self.assertTrue('peeked' in self.client.session)
         self.assertTrue(str(first.id) in self.client.session['peeked'])
         self.assertTrue(str(second.id) in self.client.session['peeked'])
+
+
+class TestSuperUserSubmissionView(BaseSubmissionViewTestCase):
+    user_factory = SuperUserFactory
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.submission = ApplicationSubmissionFactory()
+        super().setUpTestData()
+
+    def __setUp__(self):
+        self.refresh(self.submission)
+
+    def test_can_screen_submission(self):
+        screening_outcome = ScreeningStatusFactory()
+        self.post_page(self.submission, {'form-submitted-screening_form': '', 'screening_status': screening_outcome.id})
+        submission = self.refresh(self.submission)
+        self.assertEqual(submission.screening_status, screening_outcome)
+
+    def test_can_screen_applications_in_final_status(self):
+        """
+        Now that the submission has been rejected (final determination),
+        we can still screen it because we are super user
+        """
+        submission = ApplicationSubmissionFactory(rejected=True)
+        screening_outcome = ScreeningStatusFactory()
+        response = self.post_page(submission, {'form-submitted-screening_form': '', 'screening_status': screening_outcome.id})
+        submission = self.refresh(submission)
+        self.assertEqual(response.context_data['screening_form'].should_show, True)
+        self.assertEqual(submission.screening_status, screening_outcome)
+
+        # Check that an activity was created that should only be viewable internally
+        activity = Activity.objects.filter(message__contains='Screening status').first()
+        self.assertEqual(activity.visibility, TEAM)
+
+
+class TestSubmissionDetailSimplifiedView(TestCase):
+    def test_staff_only(self):
+        factory = RequestFactory()
+        submission = ApplicationSubmissionFactory()
+        ProjectFactory(submission=submission)
+
+        request = factory.get(f'/submission/{submission.pk}')
+        request.user = StaffFactory()
+
+        response = SubmissionDetailSimplifiedView.as_view()(request, pk=submission.pk)
+        self.assertEqual(response.status_code, 200)
+
+        request.user = ApplicantFactory()
+        with self.assertRaises(PermissionDenied):
+            SubmissionDetailSimplifiedView.as_view()(request, pk=submission.pk)
+
+    def test_project_required(self):
+        factory = RequestFactory()
+        submission = ApplicationSubmissionFactory()
+
+        request = factory.get(f'/submission/{submission.pk}')
+        request.user = StaffFactory()
+
+        with self.assertRaises(Http404):
+            SubmissionDetailSimplifiedView.as_view()(request, pk=submission.pk)
+
+        ProjectFactory(submission=submission)
+        response = SubmissionDetailSimplifiedView.as_view()(request, pk=submission.pk)
+        self.assertEqual(response.status_code, 200)
+
+
+class BaseSubmissionFileViewTestCase(BaseViewTestCase):
+    url_name = 'funds:submissions:{}'
+    base_view_name = 'serve_private_media'
+
+    def get_kwargs(self, instance):
+        document_fields = list(instance.file_field_ids)
+        field_id = document_fields[0]
+        document = instance.data(field_id)
+        return {
+            'pk': instance.pk,
+            'field_id': field_id,
+            'file_name': document.basename,
+        }
+
+
+class TestStaffSubmissionFileView(BaseSubmissionFileViewTestCase):
+    user_factory = StaffFactory
+
+    def test_staff_can_access(self):
+        submission = ApplicationSubmissionFactory()
+        response = self.get_page(submission)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.redirect_chain, [])
+
+
+class TestUserSubmissionFileView(BaseSubmissionFileViewTestCase):
+    user_factory = ApplicantFactory
+
+    def test_owner_can_access(self):
+        submission = ApplicationSubmissionFactory(user=self.user)
+        response = self.get_page(submission)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.redirect_chain, [])
+
+    def test_user_can_not_access(self):
+        submission = ApplicationSubmissionFactory()
+        response = self.get_page(submission)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.redirect_chain, [])
+
+
+class TestAnonSubmissionFileView(BaseSubmissionFileViewTestCase):
+    user_factory = AnonymousUser
+
+    def test_anonymous_can_not_access(self):
+        submission = ApplicationSubmissionFactory()
+        response = self.get_page(submission)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.redirect_chain), 2)
+        for path, _ in response.redirect_chain:
+            self.assertIn(reverse('users_public:login'), path)

@@ -1,9 +1,14 @@
 {% extends "base.html" %}
-{% load wagtailcore_tags wagtailimages_tags static %}
+{% load wagtailcore_tags wagtailimages_tags static markdown_tags bleach_tags %}
+{% block feedlinks %}<link rel="alternate" type="application/rss+xml" title="{{ page.title }}" href="{% url "news_feed" %}">{% endblock %}
 {% block body_class %}light-grey-bg{% endblock %}
 
 {% block content %}
 <div class="wrapper wrapper--small wrapper--inner-space-medium">
+
+        {% if page.introduction %}
+            <h4 class="heading heading--listings-introduction">{{ page.introduction|markdown|bleach }}</h4>
+        {% endif %}
 
         <form class="form" method="GET">
             <div class="form__select form__select--narrow form__select--inline">

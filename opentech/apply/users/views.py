@@ -1,18 +1,26 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AdminPasswordChangeForm
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
-from django.shortcuts import redirect, render
+from django.contrib.auth.views import SuccessURLAllowedHostsMixin
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponseRedirect
+from django.shortcuts import redirect, render, resolve_url
 from django.template.response import TemplateResponse
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
 from django.utils.encoding import force_text
-from django.utils.http import urlsafe_base64_decode
+from django.utils.http import is_safe_url, urlsafe_base64_decode
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.generic import UpdateView
 from django.views.generic.base import TemplateView
 
 from hijack.views import login_with_id
+from two_factor.views import LoginView as TwoFactorLoginView
 
 from wagtail.admin.views.account import password_management_enabled
 
@@ -21,6 +29,47 @@ from .forms import BecomeUserForm, ProfileForm
 
 
 User = get_user_model()
+
+
+class LoginView(SuccessURLAllowedHostsMixin, TwoFactorLoginView):
+    redirect_authenticated_user = False
+
+    @method_decorator(sensitive_post_parameters())
+    @method_decorator(csrf_protect)
+    @method_decorator(never_cache)
+    def dispatch(self, request, *args, **kwargs):
+        if self.redirect_authenticated_user and self.request.user.is_authenticated:
+            redirect_to = self.get_success_url()
+            if redirect_to == self.request.path:
+                raise ValueError(
+                    "Redirection loop for authenticated user detected. Check that "
+                    "your LOGIN_REDIRECT_URL doesn't point to a login page."
+                )
+            return HttpResponseRedirect(redirect_to)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_success_url(self):
+        url = self.get_redirect_url()
+        return url or resolve_url(settings.LOGIN_REDIRECT_URL)
+
+    def get_redirect_url(self):
+        """Return the user-originating redirect URL if it's safe."""
+        redirect_to = self.request.POST.get(
+            self.redirect_field_name,
+            self.request.GET.get(self.redirect_field_name, '')
+        )
+        url_is_safe = is_safe_url(
+            url=redirect_to,
+            allowed_hosts=self.get_success_url_allowed_hosts(),
+            require_https=self.request.is_secure(),
+        )
+        return redirect_to if url_is_safe else ''
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(
+            next=self.request.GET.get('next', ''),
+            **kwargs,
+        )
 
 
 @method_decorator(login_required, name='dispatch')
@@ -51,8 +100,15 @@ class AccountView(UpdateView):
 
 @login_required()
 def become(request):
-    id = request.POST['user']
+    if not request.user.is_apply_staff:
+        raise PermissionDenied()
+
+    id = request.POST.get('user')
     if request.POST and id:
+        target_user = User.objects.get(pk=id)
+        if target_user.is_superuser:
+            raise PermissionDenied()
+
         return login_with_id(request, id)
     return redirect('users:account')
 
@@ -70,9 +126,6 @@ class ActivationView(TemplateView):
         user = self.get_user(kwargs.get('uidb64'))
 
         if self.valid(user, kwargs.get('token')):
-            user.is_active = True
-            user.save()
-
             user.backend = 'django.contrib.auth.backends.ModelBackend'
             login(request, user)
             return redirect('users:activate_password')
@@ -96,8 +149,7 @@ class ActivationView(TemplateView):
         """
         try:
             user = User.objects.get(**{
-                'pk': force_text(urlsafe_base64_decode(uidb64)),
-                'is_active': False
+                'pk': force_text(urlsafe_base64_decode(uidb64))
             })
             return user
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):

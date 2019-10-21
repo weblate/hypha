@@ -10,10 +10,24 @@ from django.test import TestCase, override_settings
 from django.contrib.messages import get_messages
 
 from opentech.apply.utils.testing import make_request
-from opentech.apply.funds.tests.factories import ApplicationSubmissionFactory
-from opentech.apply.users.tests.factories import UserFactory, ReviewerFactory
+from opentech.apply.funds.tests.factories import (
+    ApplicationSubmissionFactory,
+    AssignedReviewersFactory,
+    AssignedWithRoleReviewersFactory,
+)
+from opentech.apply.review.tests.factories import ReviewFactory
+from opentech.apply.users.tests.factories import (
+    ApplicantFactory,
+    ReviewerFactory,
+    StaffFactory,
+    UserFactory
+)
+from opentech.apply.projects.tests.factories import (
+    ProjectFactory,
+    PaymentRequestFactory
+)
 
-from ..models import Activity, Event, Message
+from ..models import Activity, Event, Message, TEAM, ALL
 from ..messaging import (
     AdapterBase,
     ActivityAdapter,
@@ -44,14 +58,16 @@ class TestAdapter(AdapterBase):
         pass
 
 
-class AdapterMixin:
+@override_settings(ROOT_URLCONF='opentech.apply.urls')
+class AdapterMixin(TestCase):
     adapter = None
+    source_factory = None
 
     def process_kwargs(self, message_type, **kwargs):
         if 'user' not in kwargs:
             kwargs['user'] = UserFactory()
-        if 'submission' not in kwargs:
-            kwargs['submission'] = ApplicationSubmissionFactory()
+        if 'source' not in kwargs:
+            kwargs['source'] = self.source_factory()
         if 'request' not in kwargs:
             kwargs['request'] = make_request()
         if message_type in neat_related:
@@ -61,13 +77,18 @@ class AdapterMixin:
 
         return kwargs
 
-    def adapter_process(self, message_type, **kwargs):
+    def adapter_process(self, message_type, adapter=None, **kwargs):
+        if not adapter:
+            adapter = self.adapter
         kwargs = self.process_kwargs(message_type, **kwargs)
-        self.adapter.process(message_type, event=EventFactory(submission=kwargs['submission']), **kwargs)
+        event = EventFactory(source=kwargs['source'])
+        adapter.process(message_type, event=event, **kwargs)
 
 
 @override_settings(SEND_MESSAGES=True)
 class TestBaseAdapter(AdapterMixin, TestCase):
+    source_factory = ApplicationSubmissionFactory
+
     def setUp(self):
         patched_class = patch.object(TestAdapter, 'send_message')
         self.mock_adapter = patched_class.start()
@@ -139,7 +160,9 @@ class TestBaseAdapter(AdapterMixin, TestCase):
         self.assertTrue(self.adapter.adapter_type in messages[0].message)
 
 
-class TestMessageBackend(TestCase):
+class TestMessageBackendApplication(TestCase):
+    source_factory = ApplicationSubmissionFactory
+
     def setUp(self):
         self.mocked_adapter = Mock(AdapterBase)
         self.backend = MessengerBackend
@@ -147,7 +170,7 @@ class TestMessageBackend(TestCase):
             'related': None,
             'request': None,
             'user': UserFactory(),
-            'submission': ApplicationSubmissionFactory(),
+            'source': self.source_factory(),
         }
 
     def test_message_sent_to_adapter(self):
@@ -181,6 +204,10 @@ class TestMessageBackend(TestCase):
         self.assertEqual(Event.objects.first().by, user)
 
 
+class TestMessageBackendProject(TestMessageBackendApplication):
+    source_factory = ProjectFactory
+
+
 @override_settings(SEND_MESSAGES=True)
 class TestActivityAdapter(TestCase):
     def setUp(self):
@@ -191,40 +218,124 @@ class TestActivityAdapter(TestCase):
         user = UserFactory()
         submission = ApplicationSubmissionFactory()
 
-        self.adapter.send_message(message, user=user, submission=submission, related=None)
+        self.adapter.send_message(message, user=user, source=submission, sources=[], related=None)
 
         self.assertEqual(Activity.objects.count(), 1)
         activity = Activity.objects.first()
         self.assertEqual(activity.user, user)
         self.assertEqual(activity.message, message)
-        self.assertEqual(activity.submission, submission)
+        self.assertEqual(activity.source, submission)
 
     def test_reviewers_message_no_removed(self):
-        message = self.adapter.reviewers_updated([1], [])
+        assigned_reviewer = AssignedReviewersFactory()
+
+        message = self.adapter.reviewers_updated([assigned_reviewer], [])
 
         self.assertTrue('Added' in message)
         self.assertFalse('Removed' in message)
-        self.assertTrue('1' in message)
+        self.assertTrue(str(assigned_reviewer.reviewer) in message)
 
     def test_reviewers_message_no_added(self):
-        message = self.adapter.reviewers_updated([], [1])
+        assigned_reviewer = AssignedReviewersFactory()
+        message = self.adapter.reviewers_updated([], [assigned_reviewer])
 
         self.assertFalse('Added' in message)
         self.assertTrue('Removed' in message)
-        self.assertTrue('1' in message)
+        self.assertTrue(str(assigned_reviewer.reviewer) in message)
 
     def test_reviewers_message_both(self):
-        message = self.adapter.reviewers_updated([1], [2])
+        added, removed = AssignedReviewersFactory.create_batch(2)
+        message = self.adapter.reviewers_updated([added], [removed])
 
         self.assertTrue('Added' in message)
         self.assertTrue('Removed' in message)
-        self.assertTrue('1' in message)
-        self.assertTrue('2' in message)
+        self.assertTrue(str(added.reviewer) in message)
+        self.assertTrue(str(removed.reviewer) in message)
+
+    def test_reviewers_with_role(self):
+        with_role = AssignedWithRoleReviewersFactory()
+        message = self.adapter.reviewers_updated([with_role], [])
+        self.assertTrue(str(with_role.reviewer) in message)
+        self.assertTrue(str(with_role.role) in message)
+
+    def test_reviewers_with_and_without_role(self):
+        with_role = AssignedWithRoleReviewersFactory()
+        without_role = AssignedReviewersFactory()
+        message = self.adapter.reviewers_updated([with_role, without_role], [])
+        self.assertTrue(str(with_role.reviewer) in message)
+        self.assertTrue(str(with_role.role) in message)
+        self.assertTrue(str(without_role.reviewer) in message)
+
+    def test_internal_transition_kwarg_for_invisible_transition(self):
+        submission = ApplicationSubmissionFactory(status='post_review_discussion')
+        kwargs = self.adapter.extra_kwargs(MESSAGES.TRANSITION, source=submission, sources=None)
+
+        self.assertEqual(kwargs['visibility'], TEAM)
+
+    def test_public_transition_kwargs(self):
+        submission = ApplicationSubmissionFactory()
+        kwargs = self.adapter.extra_kwargs(MESSAGES.TRANSITION, source=submission, sources=None)
+
+        self.assertNotIn('visibility', kwargs)
+
+    def test_handle_transition_public_to_public(self):
+        submission = ApplicationSubmissionFactory(status='more_info')
+        old_phase = submission.workflow.phases_for()[0]
+
+        message = self.adapter.handle_transition(old_phase, submission)
+        message = json.loads(message)
+
+        self.assertIn(submission.phase.display_name, message[TEAM])
+        self.assertIn(old_phase.display_name, message[TEAM])
+        self.assertIn(submission.phase.public_name, message[ALL])
+        self.assertIn(old_phase.public_name, message[ALL])
+
+    def test_handle_transition_to_private_to_public(self):
+        submission = ApplicationSubmissionFactory(status='more_info')
+        old_phase = submission.workflow.phases_for()[1]
+
+        message = self.adapter.handle_transition(old_phase, submission)
+        message = json.loads(message)
+
+        self.assertIn(submission.phase.display_name, message[TEAM])
+        self.assertIn(old_phase.display_name, message[TEAM])
+        self.assertIn(submission.phase.public_name, message[ALL])
+        self.assertIn(old_phase.public_name, message[ALL])
+
+    def test_handle_transition_to_public_to_private(self):
+        submission = ApplicationSubmissionFactory(status='internal_review')
+        old_phase = submission.workflow.phases_for()[0]
+
+        message = self.adapter.handle_transition(old_phase, submission)
+
+        self.assertIn(submission.phase.display_name, message)
+        self.assertIn(old_phase.display_name, message)
+
+    def test_lead_not_saved_on_activity(self):
+        submission = ApplicationSubmissionFactory()
+        user = UserFactory()
+        self.adapter.send_message('a message', user=user, source=submission, sources=[], related=user)
+        activity = Activity.objects.first()
+        self.assertEqual(activity.related_object, None)
+
+    def test_review_saved_on_activity(self):
+        review = ReviewFactory()
+        self.adapter.send_message(
+            'a message',
+            user=review.author.reviewer,
+            source=review.submission,
+            sources=[],
+            related=review,
+        )
+        activity = Activity.objects.first()
+        self.assertEqual(activity.related_object, review)
 
 
 class TestSlackAdapter(AdapterMixin, TestCase):
+    source_factory = ApplicationSubmissionFactory
+
     target_url = 'https://my-slack-backend.com/incoming/my-very-secret-key'
-    target_room = '<ROOM ID>'
+    target_room = '#<ROOM ID>'
 
     @override_settings(
         SLACK_DESTINATION_URL=target_url,
@@ -233,7 +344,8 @@ class TestSlackAdapter(AdapterMixin, TestCase):
     @responses.activate
     def test_cant_send_with_no_room(self):
         adapter = SlackAdapter()
-        adapter.send_message('my message', '')
+        submission = ApplicationSubmissionFactory()
+        adapter.send_message('my message', '', source=submission)
         self.assertEqual(len(responses.calls), 0)
 
     @override_settings(
@@ -243,7 +355,8 @@ class TestSlackAdapter(AdapterMixin, TestCase):
     @responses.activate
     def test_cant_send_with_no_url(self):
         adapter = SlackAdapter()
-        adapter.send_message('my message', '')
+        submission = ApplicationSubmissionFactory()
+        adapter.send_message('my message', '', source=submission)
         self.assertEqual(len(responses.calls), 0)
 
     @override_settings(
@@ -253,14 +366,35 @@ class TestSlackAdapter(AdapterMixin, TestCase):
     @responses.activate
     def test_correct_payload(self):
         responses.add(responses.POST, self.target_url, status=200, body='OK')
+        submission = ApplicationSubmissionFactory()
         adapter = SlackAdapter()
         message = 'my message'
-        adapter.send_message(message, '')
+        adapter.send_message(message, '', source=submission)
         self.assertEqual(len(responses.calls), 1)
         self.assertDictEqual(
             json.loads(responses.calls[0].request.body),
             {
-                'room': self.target_room,
+                'room': [self.target_room],
+                'message': message,
+            }
+        )
+
+    @override_settings(
+        SLACK_DESTINATION_URL=target_url,
+        SLACK_DESTINATION_ROOM=target_room,
+    )
+    @responses.activate
+    def test_round_slack_channel(self):
+        responses.add(responses.POST, self.target_url, status=200, body='OK')
+        submission = ApplicationSubmissionFactory(round__parent__slack_channel='dummy')
+        adapter = SlackAdapter()
+        message = 'my message'
+        adapter.send_message(message, '', source=submission)
+        self.assertEqual(len(responses.calls), 1)
+        self.assertDictEqual(
+            json.loads(responses.calls[0].request.body),
+            {
+                'room': [self.target_room, '#dummy'],
                 'message': message,
             }
         )
@@ -269,14 +403,14 @@ class TestSlackAdapter(AdapterMixin, TestCase):
     def test_gets_lead_if_slack_set(self):
         adapter = SlackAdapter()
         submission = ApplicationSubmissionFactory()
-        recipients = adapter.recipients(MESSAGES.COMMENT, submission)
+        recipients = adapter.recipients(MESSAGES.COMMENT, source=submission, related=None)
         self.assertTrue(submission.lead.slack in recipients[0])
 
     @responses.activate
     def test_gets_blank_if_slack_not_set(self):
         adapter = SlackAdapter()
         submission = ApplicationSubmissionFactory(lead__slack='')
-        recipients = adapter.recipients(MESSAGES.COMMENT, submission)
+        recipients = adapter.recipients(MESSAGES.COMMENT, source=submission, related=None)
         self.assertTrue(submission.lead.slack in recipients[0])
 
     @override_settings(
@@ -312,11 +446,12 @@ class TestSlackAdapter(AdapterMixin, TestCase):
 
 @override_settings(SEND_MESSAGES=True)
 class TestEmailAdapter(AdapterMixin, TestCase):
+    source_factory = ApplicationSubmissionFactory
     adapter = EmailAdapter()
 
     def test_email_new_submission(self):
         submission = ApplicationSubmissionFactory()
-        self.adapter_process(MESSAGES.NEW_SUBMISSION, submission=submission)
+        self.adapter_process(MESSAGES.NEW_SUBMISSION, source=submission)
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [submission.user.email])
@@ -324,20 +459,20 @@ class TestEmailAdapter(AdapterMixin, TestCase):
     def test_no_email_private_comment(self):
         comment = CommentFactory(internal=True)
 
-        self.adapter_process(MESSAGES.COMMENT, related=comment, submission=comment.submission)
+        self.adapter_process(MESSAGES.COMMENT, related=comment, source=comment.source)
         self.assertEqual(len(mail.outbox), 0)
 
     def test_no_email_own_comment(self):
         application = ApplicationSubmissionFactory()
-        comment = CommentFactory(user=application.user, submission=application)
+        comment = CommentFactory(user=application.user, source=application)
 
-        self.adapter_process(MESSAGES.COMMENT, related=comment, user=comment.user, submission=comment.submission)
+        self.adapter_process(MESSAGES.COMMENT, related=comment, user=comment.user, source=comment.source)
         self.assertEqual(len(mail.outbox), 0)
 
     def test_reviewers_email(self):
         reviewers = ReviewerFactory.create_batch(4)
         submission = ApplicationSubmissionFactory(status='external_review', reviewers=reviewers, workflow_stages=2)
-        self.adapter_process(MESSAGES.READY_FOR_REVIEW, submission=submission)
+        self.adapter_process(MESSAGES.READY_FOR_REVIEW, source=submission)
 
         self.assertEqual(len(mail.outbox), 4)
         self.assertTrue(mail.outbox[0].subject, 'ready to review')
@@ -381,7 +516,7 @@ class TestAnyMailBehaviour(AdapterMixin, TestCase):
 
     def test_email_new_submission(self):
         submission = ApplicationSubmissionFactory()
-        self.adapter_process(MESSAGES.NEW_SUBMISSION, submission=submission)
+        self.adapter_process(MESSAGES.NEW_SUBMISSION, source=submission)
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [submission.user.email])
@@ -425,3 +560,158 @@ class TestAnyMailBehaviour(AdapterMixin, TestCase):
         message.refresh_from_db()
         self.assertTrue('rejected' in message.status)
         self.assertTrue('spam' in message.status)
+
+
+class TestAdaptersForProject(AdapterMixin, TestCase):
+    slack = SlackAdapter
+    activity = ActivityAdapter
+    source_factory = ProjectFactory
+    # Slack
+    target_url = 'https://my-slack-backend.com/incoming/my-very-secret-key'
+    target_room = '#<ROOM ID>'
+
+    def test_activity_lead_change(self):
+        old_lead = UserFactory()
+        project = self.source_factory()
+        self.adapter_process(
+            MESSAGES.UPDATE_PROJECT_LEAD,
+            adapter=self.activity(),
+            source=project,
+            related=old_lead,
+        )
+        self.assertEqual(Activity.objects.count(), 1)
+        activity = Activity.objects.first()
+        self.assertIn(str(old_lead), activity.message)
+        self.assertIn(str(project.lead), activity.message)
+
+    def test_activity_lead_change_from_none(self):
+        project = self.source_factory()
+        self.adapter_process(
+            MESSAGES.UPDATE_PROJECT_LEAD,
+            adapter=self.activity(),
+            source=project,
+            related='Unassigned',
+        )
+        self.assertEqual(Activity.objects.count(), 1)
+        activity = Activity.objects.first()
+        self.assertIn(str('Unassigned'), activity.message)
+        self.assertIn(str(project.lead), activity.message)
+
+    def test_activity_created(self):
+        project = self.source_factory()
+        self.adapter_process(
+            MESSAGES.CREATED_PROJECT,
+            adapter=self.activity(),
+            source=project,
+            related=project.submission,
+        )
+        self.assertEqual(Activity.objects.count(), 1)
+        activity = Activity.objects.first()
+        self.assertEqual(project.submission, activity.related_object)
+
+    @override_settings(
+        SLACK_DESTINATION_URL=target_url,
+        SLACK_DESTINATION_ROOM=target_room,
+    )
+    @responses.activate
+    def test_slack_created(self):
+        responses.add(responses.POST, self.target_url, status=200, body='OK')
+        project = self.source_factory()
+        user = UserFactory()
+        self.adapter_process(
+            MESSAGES.CREATED_PROJECT,
+            adapter=self.slack(),
+            user=user,
+            source=project,
+            related=project.submission,
+        )
+        self.assertEqual(len(responses.calls), 1)
+        data = json.loads(responses.calls[0].request.body)
+        self.assertIn(str(user), data['message'])
+        self.assertIn(str(project), data['message'])
+
+    @override_settings(
+        SLACK_DESTINATION_URL=target_url,
+        SLACK_DESTINATION_ROOM=target_room,
+    )
+    @responses.activate
+    def test_slack_lead_change(self):
+        responses.add(responses.POST, self.target_url, status=200, body='OK')
+        project = self.source_factory()
+        user = UserFactory()
+        self.adapter_process(
+            MESSAGES.UPDATE_PROJECT_LEAD,
+            adapter=self.slack(),
+            user=user,
+            source=project,
+            related=project.submission,
+        )
+        self.assertEqual(len(responses.calls), 1)
+        data = json.loads(responses.calls[0].request.body)
+        self.assertIn(str(user), data['message'])
+        self.assertIn(str(project), data['message'])
+
+    @override_settings(
+        SLACK_DESTINATION_URL=target_url,
+        SLACK_DESTINATION_ROOM=target_room,
+    )
+    @responses.activate
+    def test_slack_applicant_update_payment_request(self):
+        responses.add(responses.POST, self.target_url, status=200, body='OK')
+
+        project = self.source_factory()
+        payment_request = PaymentRequestFactory(project=project)
+        applicant = ApplicantFactory()
+
+        self.adapter_process(
+            MESSAGES.UPDATE_PAYMENT_REQUEST,
+            adapter=self.slack(),
+            user=applicant,
+            source=project,
+            related=payment_request,
+        )
+
+        self.assertEqual(len(responses.calls), 1)
+
+        data = json.loads(responses.calls[0].request.body)
+        self.assertIn(str(applicant), data['message'])
+        self.assertIn(str(project), data['message'])
+
+    @override_settings(
+        SLACK_DESTINATION_URL=target_url,
+        SLACK_DESTINATION_ROOM=target_room,
+    )
+    @responses.activate
+    def test_slack_staff_update_payment_request(self):
+        responses.add(responses.POST, self.target_url, status=200, body='OK')
+
+        project = self.source_factory()
+        payment_request = PaymentRequestFactory(project=project)
+        staff = StaffFactory()
+
+        self.adapter_process(
+            MESSAGES.UPDATE_PAYMENT_REQUEST,
+            adapter=self.slack(),
+            user=staff,
+            source=project,
+            related=payment_request,
+        )
+
+        self.assertEqual(len(responses.calls), 1)
+
+    @override_settings(SEND_MESSAGES=True)
+    def test_email_staff_update_payment_request(self):
+        project = self.source_factory()
+        payment_request = PaymentRequestFactory(project=project)
+        staff = StaffFactory()
+
+        self.adapter_process(
+            MESSAGES.UPDATE_PAYMENT_REQUEST,
+            adapter=EmailAdapter(),
+            user=staff,
+            source=project,
+            related=payment_request,
+        )
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [project.user.email])

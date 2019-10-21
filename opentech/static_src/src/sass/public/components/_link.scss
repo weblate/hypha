@@ -1,7 +1,17 @@
 .link {
+    &:disabled,
+    &.is-disabled {
+        pointer-events: none;
+        opacity: .5;
+    }
+
     &--button {
         @include button($color--light-blue, $color--dark-blue);
         display: inline-block;
+
+        &--narrow {
+            @include button--narrow;
+        }
 
         &__stretch {
             width: 100%;
@@ -26,6 +36,7 @@
         @include button(transparent, $color--darkest-blue);
         color: $color--white;
 
+        &:focus,
         &:hover {
             border: 1px solid transparent;
         }

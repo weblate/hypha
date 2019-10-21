@@ -1,8 +1,13 @@
 # Credit to https://github.com/BertrandBordage for initial implementation
 import bleach
+from dateutil.parser import isoparse, parse
+from django_bleach.templatetags.bleach_tags import bleach_value
 
 from django import forms
+from django.conf import settings
+from django.core.validators import FileExtensionValidator
 from django.db.models import BLANK_CHOICE_DASH
+from django.forms.widgets import ClearableFileInput
 from django.utils.dateparse import parse_datetime
 from django.utils.encoding import force_text
 from django.utils.text import slugify
@@ -10,7 +15,7 @@ from django.utils.translation import ugettext_lazy as _
 from unidecode import unidecode
 from wagtail.core.blocks import (
     StructBlock, TextBlock, CharBlock, BooleanBlock, ListBlock, StreamBlock,
-    DateBlock, TimeBlock, DateTimeBlock, ChoiceBlock, RichTextBlock
+    DateBlock, TimeBlock, DateTimeBlock, ChoiceBlock, RichTextBlock, StaticBlock, URLBlock
 )
 
 from .fields import MultiFileField
@@ -19,6 +24,7 @@ from .fields import MultiFileField
 class FormFieldBlock(StructBlock):
     field_label = CharBlock(label=_('Label'))
     help_text = TextBlock(required=False, label=_('Help text'))
+    help_link = URLBlock(required=False, label=_('Help link'))
 
     field_class = forms.CharField
     widget = None
@@ -36,9 +42,11 @@ class FormFieldBlock(StructBlock):
         return self.widget
 
     def get_field_kwargs(self, struct_value):
-        kwargs = {'label': struct_value['field_label'],
-                  'help_text': struct_value['help_text'],
-                  'required': struct_value.get('required', False)}
+        kwargs = {
+            'label': struct_value['field_label'],
+            'help_text': struct_value['help_text'],
+            'required': struct_value.get('required', False)
+        }
         if 'default_value' in struct_value:
             kwargs['initial'] = struct_value['default_value']
         form_widget = self.get_widget(struct_value)
@@ -50,16 +58,43 @@ class FormFieldBlock(StructBlock):
         field_kwargs = self.get_field_kwargs(struct_value)
         return self.get_field_class(struct_value)(**field_kwargs)
 
-    def get_context(self, value, parent_context):
-        context = super().get_context(value, parent_context)
-        parent_context['data'] = self.format_data(parent_context['data']) or self.no_response()
-        return context
+    def decode(self, value):
+        """Convert JSON representation into actual python objects"""
+        return value
+
+    def serialize(self, value, context):
+        field_kwargs = self.get_field_kwargs(value)
+        return {
+            'question': field_kwargs['label'],
+            'answer': context.get('data'),
+            'type': self.name,
+        }
+
+    def serialize_no_response(self, value, context):
+        return {
+            'question': value['field_label'],
+            'answer': 'No Response',
+            'type': 'no_response',
+        }
+
+    def prepare_data(self, value, data, serialize=False):
+        return bleach_value(str(data))
+
+    def render(self, value, context):
+        data = context.get('data')
+        data = self.prepare_data(value, data, context.get('serialize', False))
+
+        context.update(data=data or self.no_response())
+
+        if context.get('serialize'):
+            if not data:
+                return self.serialize_no_response(value, context)
+            return self.serialize(value, context)
+
+        return super().render(value, context)
 
     def get_searchable_content(self, value, data):
         return str(data)
-
-    def format_data(self, data):
-        return data
 
     def no_response(self):
         return "No response"
@@ -67,9 +102,6 @@ class FormFieldBlock(StructBlock):
 
 class OptionalFormFieldBlock(FormFieldBlock):
     required = BooleanBlock(label=_('Required'), required=False)
-
-    def get_searchable_content(self, value, data):
-        return data
 
 
 CHARFIELD_FORMATS = [
@@ -97,7 +129,7 @@ class CharFieldBlock(OptionalFormFieldBlock):
     def get_searchable_content(self, value, data):
         # CharField acts as a fallback. Force data to string
         data = str(data)
-        return bleach.clean(data, tags=[], strip=True)
+        return bleach.clean(data or '', tags=[], strip=True)
 
 
 class TextFieldBlock(OptionalFormFieldBlock):
@@ -110,7 +142,7 @@ class TextFieldBlock(OptionalFormFieldBlock):
         template = 'stream_forms/render_unsafe_field.html'
 
     def get_searchable_content(self, value, data):
-        return bleach.clean(data, tags=[], strip=True)
+        return bleach.clean(data or '', tags=[], strip=True)
 
 
 class NumberFieldBlock(OptionalFormFieldBlock):
@@ -125,7 +157,7 @@ class NumberFieldBlock(OptionalFormFieldBlock):
         return None
 
 
-class CheckboxFieldBlock(FormFieldBlock):
+class CheckboxFieldBlock(OptionalFormFieldBlock):
     default_value = BooleanBlock(required=False)
 
     field_class = forms.BooleanField
@@ -152,11 +184,57 @@ class RadioButtonsFieldBlock(OptionalFormFieldBlock):
         icon = 'radio-empty'
 
     def get_field_kwargs(self, struct_value):
-        kwargs = super(RadioButtonsFieldBlock,
-                       self).get_field_kwargs(struct_value)
-        kwargs['choices'] = [(choice, choice)
-                             for choice in struct_value['choices']]
+        kwargs = super().get_field_kwargs(struct_value)
+        kwargs['choices'] = [
+            (choice, choice)
+            for choice in struct_value['choices']
+        ]
         return kwargs
+
+
+class GroupToggleBlock(FormFieldBlock):
+    required = BooleanBlock(label=_('Required'), default=True)
+    choices = ListBlock(
+        CharBlock(label=_('Choice')),
+        help_text=(
+            'Please create only two choices for toggle. '
+            'First choice will revel the group and the second hide it. '
+            'Additional choices will be ignored.'
+        )
+    )
+
+    field_class = forms.ChoiceField
+    widget = forms.RadioSelect
+
+    class Meta:
+        label = _('Group fields')
+        icon = 'group'
+        help_text = 'Remember to end group using Group fields end block.'
+
+    def get_field_kwargs(self, struct_value):
+        kwargs = super().get_field_kwargs(struct_value)
+        field_choices = [
+            (choice, choice)
+            for choice in struct_value['choices']
+        ]
+        total_choices = len(field_choices)
+        if total_choices > 2:
+            # For toggle we need only two choices
+            field_choices = field_choices[:2]
+        elif total_choices < 2:
+            field_choices = [
+                ('yes', 'Yes'),
+                ('no', 'No'),
+            ]
+        kwargs['choices'] = field_choices
+        return kwargs
+
+
+class GroupToggleEndBlock(StaticBlock):
+    class Meta:
+        label = 'Group fields end'
+        icon = 'group'
+        admin_text = 'End of Group fields Block'
 
 
 class DropdownFieldBlock(RadioButtonsFieldBlock):
@@ -167,8 +245,7 @@ class DropdownFieldBlock(RadioButtonsFieldBlock):
         icon = 'arrow-down-big'
 
     def get_field_kwargs(self, struct_value):
-        kwargs = super(DropdownFieldBlock,
-                       self).get_field_kwargs(struct_value)
+        kwargs = super().get_field_kwargs(struct_value)
         kwargs['choices'].insert(0, BLANK_CHOICE_DASH[0])
         return kwargs
 
@@ -185,11 +262,16 @@ class CheckboxesFieldBlock(OptionalFormFieldBlock):
         template = 'stream_forms/render_list_field.html'
 
     def get_field_kwargs(self, struct_value):
-        kwargs = super(CheckboxesFieldBlock,
-                       self).get_field_kwargs(struct_value)
-        kwargs['choices'] = [(choice, choice)
-                             for choice in struct_value['checkboxes']]
+        kwargs = super().get_field_kwargs(struct_value)
+        kwargs['choices'] = [
+            (choice, choice)
+            for choice in struct_value['checkboxes']
+        ]
         return kwargs
+
+    def prepare_data(self, value, data, serialize=False):
+        base_prepare = super().prepare_data
+        return [base_prepare(value, item, serialize) for item in data]
 
     def get_searchable_content(self, value, data):
         return data
@@ -221,6 +303,10 @@ class DateFieldBlock(OptionalFormFieldBlock):
     def get_searchable_content(self, value, data):
         return None
 
+    def decode(self, value):
+        if value:
+            return parse(value).date()
+
 
 class HTML5TimeInput(forms.TimeInput):
     input_type = 'time'
@@ -238,6 +324,10 @@ class TimeFieldBlock(OptionalFormFieldBlock):
 
     def get_searchable_content(self, value, data):
         return None
+
+    def decode(self, value):
+        if value:
+            return parse(value).time()
 
 
 class DateTimePickerInput(forms.SplitDateTimeWidget):
@@ -268,6 +358,10 @@ class DateTimeFieldBlock(OptionalFormFieldBlock):
     def get_searchable_content(self, value, data):
         return None
 
+    def decode(self, value):
+        if value:
+            return isoparse(value)
+
 
 class UploadableMediaBlock(OptionalFormFieldBlock):
     class Meta:
@@ -276,13 +370,29 @@ class UploadableMediaBlock(OptionalFormFieldBlock):
     def get_searchable_content(self, value, data):
         return None
 
+    def prepare_data(self, value, data, serialize):
+        if serialize:
+            if data:
+                return data.serialize()
+            return None
+
+        return data
+
 
 class ImageFieldBlock(UploadableMediaBlock):
     field_class = forms.ImageField
+    widget = ClearableFileInput
 
     class Meta:
         label = _('Image field')
         icon = 'image'
+
+    def get_field_kwargs(self, struct_value):
+        kwargs = super().get_field_kwargs(struct_value)
+        # We do not need this when we are on Django 2.1
+        # https://docs.djangoproject.com/en/2.1/releases/2.1/#forms
+        kwargs['widget'] = self.get_widget(struct_value)(attrs={'accept': 'image/*'})
+        return kwargs
 
 
 class FileFieldBlock(UploadableMediaBlock):
@@ -291,10 +401,19 @@ class FileFieldBlock(UploadableMediaBlock):
     You must implement this if you want to reuse it.
     """
     field_class = forms.FileField
+    widget = ClearableFileInput
 
     class Meta:
         label = _('File field')
         icon = 'download'
+
+    def get_field_kwargs(self, struct_value):
+        kwargs = super().get_field_kwargs(struct_value)
+        kwargs['validators'] = [
+            FileExtensionValidator(allowed_extensions=settings.FILE_ALLOWED_EXTENSIONS)
+        ]
+        kwargs['widget'] = self.get_widget(struct_value)(attrs={'accept': settings.FILE_ACCEPT_ATTR_VALUE})
+        return kwargs
 
 
 class MultiFileFieldBlock(UploadableMediaBlock):
@@ -304,12 +423,17 @@ class MultiFileFieldBlock(UploadableMediaBlock):
         label = _('Multiple File field')
         template = 'stream_forms/render_multi_file_field.html'
 
+    def prepare_data(self, value, data, serialize):
+        if serialize:
+            return [file.serialize() for file in data]
+        return data
+
     def no_response(self):
         return [super().no_response()]
 
 
 class FormFieldsBlock(StreamBlock):
-    text_markup = RichTextBlock(group=_('Other'), label=_('Paragraph'))
+    text_markup = RichTextBlock(group=_('Custom'), label=_('Section text/header'))
     char = CharFieldBlock(group=_('Fields'))
     text = TextFieldBlock(group=_('Fields'))
     number = NumberFieldBlock(group=_('Fields'))
@@ -323,6 +447,8 @@ class FormFieldsBlock(StreamBlock):
     image = ImageFieldBlock(group=_('Fields'))
     file = FileFieldBlock(group=_('Fields'))
     multi_file = MultiFileFieldBlock(group=_('Fields'))
+    group_toggle = GroupToggleBlock(group=_("Custom"))
+    group_toggle_end = GroupToggleEndBlock(group=_("Custom"))
 
     class Meta:
         label = _('Form fields')

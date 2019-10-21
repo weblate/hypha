@@ -23,7 +23,13 @@ body {
 
     &.no-scroll {
         overflow-y: hidden;
-	}
+    }
+
+    &.app-open {
+        @supports(overflow-y: overlay) {
+            overflow-y: overlay;
+        }
+    }
 }
 
 // Prevent empty space below images appearing
@@ -80,6 +86,20 @@ ol {
     display: none;
 }
 
+.js-hidden,
+%js-hidden {
+    html.js & {
+        @extend %is-hidden;
+    }
+}
+
+.no-js-hidden,
+%no-js-hidden {
+    html.no-js & {
+        @extend %is-hidden;
+    }
+}
+
 .is-unhidden,
 %is-unhidden {
     display: block;
@@ -99,4 +119,8 @@ ol {
 
 .light-grey-bg {
     background-color: $color--light-grey;
+}
+
+.mid-grey-text {
+    color: $color--mid-dark-grey;
 }

@@ -71,10 +71,6 @@
         grid-gap: 10px; // sass-lint:disable-line no-misspelled-properties
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 
-        .form & {
-            margin: 0;
-        }
-
         > * {
             flex-basis: initial;
             width: auto;
@@ -129,6 +125,23 @@
 
         &--no-margin {
             margin: 0;
+        }
+
+        &--proposal-info {
+            padding-bottom: 30px;
+            margin: 0 0 30px;
+            border-bottom: 1px solid $color--mid-grey;
+            grid-template-columns: 100%;
+            grid-gap: 10px; // sass-lint:disable-line no-misspelled-properties
+
+            @include media-query(mob-landscape) {
+                margin: 0 0 30px;
+                grid-template-columns: 1fr 1fr;
+            }
+
+            * {
+                margin: 0;
+            }
         }
 
         &--focus-areas {

@@ -9,6 +9,11 @@ VIRTUALENV_DIR=/home/vagrant/.virtualenvs/$PROJECT_NAME
 PYTHON=$VIRTUALENV_DIR/bin/python
 PIP=$VIRTUALENV_DIR/bin/pip
 
+# Upgrade to postgres 10
+apt-get update -y
+apt-get remove -y --purge postgresql-*
+apt-get install -y postgresql-10 postgresql-client-10 postgresql-contrib-10
+su - postgres -c "createuser -s vagrant"
 
 # Create database
 
@@ -53,10 +58,10 @@ cd $PROJECT_DIR
 EOF
 
 # Install node.js and npm
-su - vagrant -c "curl -sL https://deb.nodesource.com/setup_8.x | sudo -E bash -"
+su - vagrant -c "curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash -"
 su - vagrant -c "sudo apt-get install -y nodejs"
 
 # Build the static files
-su - vagrant -c "sudo npm install -g yarn"
-su - vagrant -c "cd $PROJECT_DIR/$MODULE_NAME/static_src; yarn install"
-su - vagrant -c "cd $PROJECT_DIR/$MODULE_NAME/static_src; yarn build"
+su - vagrant -c "sudo npm install -g gulp-cli"
+su - vagrant -c "cd $PROJECT_DIR; npm install"
+su - vagrant -c "cd $PROJECT_DIR; gulp deploy"

@@ -6,9 +6,8 @@
             margin: 0 0 10px;
 
             label {
-                @extend %h4;
                 display: block;
-                margin-bottom: 10px;
+                margin-bottom: .5em;
                 font-weight: $weight--bold;
             }
         }
@@ -18,27 +17,20 @@
         }
     }
 
-    &--header-search-desktop {
+    &--search-desktop {
         position: relative;
-        width: 280px;
+        max-width: 300px;
+        margin-top: $mobile-gutter;
 
-        @include media-query(small-tablet) {
-            margin-top: 15px;
+        @include media-query(tablet-landscape) {
+            max-width: 280px;
+            margin: 0 0 0 30px;
         }
     }
 
     &__group {
         position: relative;
         margin: 1rem 0;
-
-        @include media-query(tablet-portrait) {
-            margin: 2rem 0;
-
-            // reduce spacing on the profile page
-            .profile & {
-                margin: 1rem 0;
-            }
-        }
 
         &:nth-of-type(1) {
             margin-top: 0;
@@ -83,9 +75,8 @@
     }
 
     &__question {
-        @extend %h4;
         display: block;
-        margin-bottom: 10px;
+        margin-bottom: .5em;
         font-weight: $weight--bold;
 
         // sass-lint:disable class-name-format
@@ -117,10 +108,50 @@
         // sass-lint:enddisable
     }
 
+    &__file-list {
+        ul {
+            margin:  .5rem 0;
+        }
+    }
+
+    &__file-drop-zone {
+        color: $color--mid-grey;
+        padding: 25px;
+        font-size: 17px;
+        font-weight: $weight--bold;
+        text-align: center;
+        border: 2px dashed $color--mid-grey;
+        border-radius: 5px;
+    }
+
     &__filters {
-        @extend %h6;
-        display: flex;
-        padding: 10px 0 30px;
+        #{$filter-dropdown} {
+            border: 0;
+            border-top: 1px solid $color--mid-grey;
+
+            &.is-active {
+                font-weight: $weight--normal;
+                background-color: transparentize($color--primary, .9);
+                border-color: $color--mid-grey;
+            }
+
+            @include media-query(tablet-landscape) {
+                border: 1px solid $color--mid-grey;
+            }
+        }
+
+        @include media-query(tablet-landscape) {
+            display: flex;
+            align-items: flex-start;
+            padding: 10px 0 30px;
+            opacity: 0;
+            transition: opacity $transition;
+
+            .filters-open & {
+                opacity: 1;
+                transition-delay: $base-delay * 10;
+            }
+        }
 
         label {
             display: none;
@@ -128,24 +159,18 @@
 
         // so the form can be output in any tag
         > * {
-            flex-basis: 225px;
-            margin-right: 10px;
+            @include media-query(tablet-landscape) {
+                flex-basis: 225px;
+
+                &:not(:last-child) {
+                    margin-right: 10px;
+                }
+            }
         }
 
         &--mobile {
             flex-direction: column;
             padding: 0;
-
-            .select2 .select2-selection.select2-selection--single { // sass-lint:disable-line force-element-nesting
-                border: 0;
-                border-top: 1px solid $color--mid-grey;
-
-                &.is-active {
-                    font-weight: $weight--normal;
-                    background-color: transparentize($color--primary, 0.9);
-                    border-color: $color--mid-grey;
-                }
-            }
 
             // so the form can be output in any tag
             > * {
@@ -156,9 +181,6 @@
     }
 
     &__label {
-        @extend %h5;
-        font-weight: $weight--bold;
-
         .wrapper--comments & {
             font-size: 15px;
         }
@@ -169,11 +191,19 @@
     }
 
     &__help {
-        @extend %h6;
-
         .profile & {
             margin-top: 0;
         }
+    }
+
+    &__help-link {
+        text-align: right;
+    }
+
+    &__open-icon {
+        width: 20px;
+        height: 20px;
+        fill: $color--dark-grey;
     }
 
     &__item {
@@ -182,7 +212,7 @@
 
         > label {
             display: block;
-            margin-bottom: 10px;
+            margin-bottom: .5em;
         }
     }
 
@@ -196,6 +226,7 @@
         }
 
         .form__filters & {
+            background: $color--white;
             max-width: 100%;
         }
 
@@ -231,7 +262,7 @@
     input[type='datetime-local'] {
         width: 100%;
         max-width: 385px;
-        padding: 10px;
+        padding: .4em;
         border: 1px solid $color--mid-grey;
 
         &:disabled {
@@ -298,10 +329,18 @@
         }
     }
 
-    textarea {
+    textarea,
+    &__textarea {
+        display: block;
         width: 100%;
-        padding: 10px;
-        border: 1px solid lightgrey;
+        padding: .4em;
+        margin-bottom: 1em;
+        border: 1px solid $color--mid-grey;
+        line-height: $base-line-height / $base-font-size;
+
+        @include media-query(tablet-portrait) {
+            max-width: 70%;
+        }
     }
 
     // Radio + Checkbox
@@ -379,27 +418,55 @@
             background-size: 12px;
             border: 1px solid $color--dark-blue;
         }
+
+        &.delete {
+            + label {
+                padding-left: 0;
+
+                &::before {
+                    display: none;
+                }
+
+                &::after {
+                    content: '';
+                    background: url('./../../images/cross.svg') left no-repeat;
+                    margin-left: 10px;
+                    width: 14px;
+                    height: 13px;
+                    display: inline-block;
+                }
+            }
+
+            &:checked + label {
+                text-decoration: line-through;
+                color: $color--black-60;
+
+                &::after {
+                    content: '(will be removed on save) - undo';
+                    background: none;
+                    color: $color--light-blue;
+                    font-size: 14px;
+                    position: absolute;
+                    font-weight: $weight--bold;
+                    width: auto;
+                    height: auto;
+                }
+            }
+
+
+        }
     }
 
     .errorlist {
         padding: 5px;
-        margin-bottom: 5px;
+        margin-bottom: .2em;
         background: $color--light-pink;
         border: 1px solid $color--tomato;
     }
 
-    textarea,
-    &__textarea {
-        display: block;
-        width: 100%;
-        height: 100px;
-        padding: 10px;
-        margin-bottom: 20px;
+    .address {
+        padding: .4em;
         border: 1px solid $color--mid-grey;
-
-        @include media-query(tablet-portrait) {
-            max-width: 70%;
-        }
+        max-width: 410px;
     }
 }
-

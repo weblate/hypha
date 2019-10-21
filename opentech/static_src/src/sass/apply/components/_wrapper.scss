@@ -89,6 +89,10 @@
         margin: 0 auto 2rem;
         background: $color--light-pink;
         border: 1px solid $color--tomato;
+
+        .feed & {
+            margin: 0 0 1rem;
+        }
     }
 
     &--bottom-space {
@@ -167,12 +171,16 @@
             }
         }
 
-        > div:first-child {
+        &--inner {
             flex: 1;
 
             @include media-query(tablet-portrait) {
                 padding-right: 20px;
             }
+        }
+
+        .card:first-child {
+            margin-top: 20px;
         }
     }
 
@@ -264,9 +272,29 @@
 
     &--reviews-table {
         overflow-x: scroll;
+    }
 
-        &:hover {
-            cursor: all-scroll;
+    &--table-actions {
+        @include media-query(tablet-portrait) {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        @include media-query(tablet-landscape) {
+            justify-content: flex-end;
+        }
+    }
+
+    &--submission-actions {
+        margin-left: auto;
+        display: flex;
+        margin-top: 1rem;
+        align-items: flex-start;
+
+        @include media-query(tablet-landscape) {
+            margin-top: 0;
+            justify-content: flex-end;
+            flex: 1;
         }
     }
 }

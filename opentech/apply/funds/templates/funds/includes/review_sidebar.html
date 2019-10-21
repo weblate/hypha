@@ -1,0 +1,34 @@
+{% load review_tags %}
+<ul class="reviews-sidebar js-reviews-sidebar">
+    <li class="reviews-sidebar__item reviews-sidebar__item--header">
+        <div></div>
+        <div>{{ recommendation|traffic_light }}</div>
+        <div></div>
+    </li>
+
+    {% if not staff_reviewers_exist %}
+        <li class="reviews-sidebar__no-reviews">No staff reviewers yet</li>
+        <hr class="reviews-sidebar__split">
+    {% endif %}
+
+    {% regroup assigned_reviewers by type as reviewers_list %}
+
+    {% for reviewer_type, reviewers in reviewers_list %}
+        {% if not forloop.first %}
+            {% ifchanged reviewer_type %}
+                <hr class="reviews-sidebar__split">
+            {% endifchanged %}
+        {% endif %}
+
+        {% for reviewer in reviewers %}
+            {% if reviewer_type.name in hidden_types %}
+                {% include 'funds/includes/review_sidebar_item.html' with reviewer=reviewer hidden=True %}
+                {% if forloop.last %}
+                    <li><a class="link link--bold link--underlined js-toggle-reviewers" href="#">All Assigned Advisors</a></li>
+                {% endif %}
+             {% else %}
+                {% include 'funds/includes/review_sidebar_item.html' with reviewer=reviewer %}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+</ul>

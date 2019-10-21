@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 
 from modelcluster.fields import ParentalKey
+from pagedown.widgets import PagedownWidget
 
 from wagtail.core.models import Orderable
 from wagtail.core.fields import StreamField
@@ -13,10 +14,12 @@ from wagtail.admin.edit_handlers import (
     PageChooserPanel,
     StreamFieldPanel,
 )
+from wagtail.contrib.settings.models import BaseSetting, register_setting
 from wagtail.search import index
 
 from opentech.public.utils.models import BasePage, RelatedPage
-from opentech.public.utils.blocks import StoryBlock
+
+from .blocks import NewsStoryBlock
 
 
 class NewsType(models.Model):
@@ -55,9 +58,7 @@ class NewsPageRelatedPage(RelatedPage):
 class NewsProjectRelatedPage(RelatedPage):
     page = models.ForeignKey(
         'wagtailcore.Page',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name='news_mentions',
     )
     source_page = ParentalKey(
@@ -99,7 +100,7 @@ class NewsPage(BasePage):
         "news item appears to have been published."
     )
     introduction = models.TextField(blank=True)
-    body = StreamField(StoryBlock())
+    body = StreamField(NewsStoryBlock(block_counts={'awesome_table_widget': {'max_num': 1}}))
 
     search_fields = BasePage.search_fields + [
         index.SearchField('introduction'),
@@ -123,10 +124,19 @@ class NewsPage(BasePage):
         else:
             return self.first_published_at
 
+    def get_absolute_url(self):
+        return self.full_url
+
 
 class NewsIndex(BasePage):
     subpage_types = ['NewsPage']
     parent_page_types = ['home.HomePage']
+
+    introduction = models.TextField(blank=True)
+
+    content_panels = BasePage.content_panels + [
+        FieldPanel('introduction', widget=PagedownWidget())
+    ]
 
     def get_context(self, request, *args, **kwargs):
         news = NewsPage.objects.live().public().descendant_of(self).annotate(
@@ -136,7 +146,7 @@ class NewsIndex(BasePage):
             'authors__author',
         )
 
-        if request.GET.get('news_type'):
+        if request.GET.get('news_type') and request.GET.get('news_type').isdigit():
             news = news.filter(news_types__news_type=request.GET.get('news_type'))
 
         # Pagination
@@ -158,3 +168,14 @@ class NewsIndex(BasePage):
             ).distinct()
         )
         return context
+
+
+@register_setting
+class NewsFeedSettings(BaseSetting):
+    news_title = models.CharField(max_length=255, help_text='The title of the main news feed.')
+    news_description = models.CharField(max_length=255, help_text='The description of the main news feed.')
+
+    news_per_type_title = models.CharField(
+        max_length=255, help_text='The title of the news feed by type. Use {news_type} to insert the type name.')
+    news_per_type_description = models.CharField(
+        max_length=255, help_text='The description of the news feed by type. Use {news_type} to insert the type name.')

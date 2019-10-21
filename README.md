@@ -1,52 +1,48 @@
-opentech.fund Wagtail site
-==================
+# Hypha
 
-## Contributing
+<a href="https://travis-ci.org/opentechfund/opentech.fund">
+ <img src="https://travis-ci.org/opentechfund/opentech.fund.svg?branch=master" alt="Build Status" />
+</a>
 
-1. Make changes on a new branch, including a broad category and the ticket number if relevant e.g. `feature/123-extra-squiggles`, `fix/newsletter-signup`.
-1. Push your branch to the remote.
-1. Edit details as necessary.
+## Submission management software
 
+* Manage the collection and review of applications or submissions openly and efficiently.
+* Customize all aspects of the process, forms, workflows, review options, and more.
+* Automate workflows and integrate with other services (Slack, Mailgun, etc).
+* Regularly audited software with many privacy and security features.
+* View our [Roadmap](/wiki/Roadmap) for upcoming features and enhancements.
 
+*Built with [Django](https://www.djangoproject.com/), [Wagtail](https://wagtail.io/), and [React](https://reactjs.org/)*
 
-If you need to preview work on `staging`, this can be merged and deployed manually without making a merge request. You can still make the merge request as above, but add a note to say that this is on `staging`, and not yet ready to be merged to `master`.
+*Deploy with [Heroku](/wiki/Deployment:-Heroku), [Docker](/wiki/Deployment:-Docker), or [your own server](/wiki/Deployment:-Standalone-App).*
 
-# Setting up a local build
+## Maintainers
 
-This repository includes a Vagrantfile for running the project in a Debian VM.
+- [Open Technology Fund](https://www.opentech.fund)
 
-To set up a new build:
+## Contributors
+Thank you to all the people who have contributed to Hypha!
 
-``` bash
-git clone git@github.com:OpenTechFund/opentech.fund.git
-cd opentech.fund
-vagrant up
-vagrant ssh
-```
+***Special thanks to:***
 
-Then within the SSH session:
+- [Combonetwork](https://www.combonet.se/)
+- [Torchbox](https://torchbox.com/digital-products/)
+- [Parbhat](https://github.com/Parbhat)
+## Community
+More here soon!
 
-``` bash
-dj migrate
-dj createcachetable
-dj createsuperuser
-djrun
-```
+## Support Hypha
+Hypha is an open source project made possible thanks to the support by our amazing backers.
 
-This will make the site available on the host machine at: http://127.0.0.1:8000/
+Issues on Hypha can be funded by anyone and the money will be distributed to contributors and maintainers. If you use Hypha please consider becoming a backer:
 
-# Updating front-end files
+[![Let's fund issues in this repository](https://issuehunt.io/static/embed/issuehunt-button-v1.svg)](https://issuehunt.io/r/OpenTechFund/opentech.fund)
 
-Any changes made to sass or js files will need to be recompiled using:
+## More information
+* Website: coming soon
+* Docs: coming soon
+* Why Hypha? **[Hyphae](https://en.wikipedia.org/wiki/Mycorrhizal_network):** long, branching ecosystem enriching organisms that form interconnected networks to collectively exchange resources. Hopefully, Hypha helps it's users do the same.
+* Copyright (C) 2019 - Open Technology Fund
 
-``` bash
-yarn build
-```
-
-Alternatively you can run the watcher that will rebuild on change to files:
-
-``` bash
-yarn start
-```
-
-Both commands should be run from within the `opentech/static_src` folder in the vagrant box.
+### License
+[BSD 3-clause](./LICENSE)

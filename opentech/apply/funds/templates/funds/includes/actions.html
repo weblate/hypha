@@ -1,16 +1,30 @@
-{% if mobile %}
-    <a class="js-actions-toggle button button--white button--full-width button--actions">Actions to take</a>
+<h5>Actions to take</h5>
+
+
+{% if PROJECTS_ENABLED %}
+{% if object.accepted_for_funding and not object.project %}
+    <a data-fancybox
+        data-src="#create-project"
+        class="button button--bottom-space button--primary button--full-width"
+        href="#">
+        Create Project
+    </a>
+{% endif %}
 {% endif %}
 
-<div class="js-actions-sidebar sidebar__inner sidebar__inner--light-blue sidebar__inner--actions {% if mobile %}sidebar__inner--mobile{% endif %}">
-    <h5>Actions to take</h5>
-    <a data-fancybox data-src="#update-status" class="button button--primary button--full-width {% if progress_form.should_show %}is-not-disabled{% else %}is-disabled{% endif %}" href="#">Update status</a>
-    <p class="sidebar__separator">Assign</p>
+<a data-fancybox data-src="#screen-application" class="button button--bottom-space button--primary button--full-width {% if screening_form.should_show %}is-not-disabled{% else %}is-disabled{% endif %}" href="#">Screen application</a>
 
-    <div class="wrapper wrapper--sidebar-buttons">
-        <a data-fancybox data-src="#update-reviewers" class="button button--half-width button--white" href="#">Reviewers</a>
-        <a data-fancybox data-src="#assign-lead" class="button button--half-width button--white" href="#">Lead</a>
-    </div>
+<a data-fancybox data-src="#update-status" class="button button--primary button--full-width {% if progress_form.should_show %}is-not-disabled{% else %}is-disabled{% endif %}" href="#">Update status</a>
 
-    <a class="button button--white button--full-width button--bottom-space" href="{% url 'funds:submissions:revisions:list' submission_pk=object.id %}">Revisions</a>
+
+<p class="sidebar__separator">Assign</p>
+
+<div class="wrapper wrapper--sidebar-buttons">
+    <a data-fancybox data-src="#update-reviewers" class="button button--half-width button--white" href="#">Reviewers</a>
+    <a data-fancybox data-src="#update-partners" class="button button--half-width button--white" href="#">Partners</a>
+    <a data-fancybox data-src="#assign-lead" class="button button--half-width button--white" href="#">Lead</a>
 </div>
+
+<a class="button button--white button--full-width button--bottom-space" href="{% url 'funds:submissions:revisions:list' submission_pk=object.id %}">Revisions</a>
+
+<a data-fancybox data-src="#update-meta-terms" class="button button--white button--full-width button--bottom-space" href="#">Meta Terms</a>

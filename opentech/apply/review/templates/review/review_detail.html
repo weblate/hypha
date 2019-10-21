@@ -1,11 +1,13 @@
 {% extends "base-apply.html" %}
-{% load bleach_tags %}
-
+{% load bleach_tags submission_tags %}
+{% block title %}Review for {{ review.submission.title }}{% endblock %}
 {% block content %}
 <div class="admin-bar">
     <div class="admin-bar__inner">
         <h1 class="beta heading heading--no-margin heading--bold">Review</h1>
-        <h5>For <a href="{% url "funds:submissions:detail" review.submission.id %}">{{ review.submission.title }}</a></h5>
+        <h5>For <a href="{% url "funds:submissions:detail" review.submission.id %}">{{ review.submission.title }}</a> by {{ review.author }} at {{ review.created_at|date:"Y-m-d" }} {% if review.is_updated %}<small>(Last updated: {{ review.updated_at|date:"Y-m-d" }})</small>{% endif %}</h5>
+
+        {% include 'review/includes/review_opinions_list.html' with opinions=review.opinions.all %}
     </div>
 </div>
 
@@ -16,8 +18,28 @@
     </div>
     <div>
         <h5>Score</h5>
-        <p>{{ review.score }}</p>
+        <p>{{ review.get_score_display }}</p>
     </div>
+    <div>
+        <svg class="icon icon--eye"><use xlink:href="#eye"></use></svg>
+        {{ review.get_visibility_display }}
+    </div>
+    {% if perms.funds.delete_review or request.user == review.author.reviewer %}
+        <div>
+            <a class="link link--delete-review is-active" href="{% url 'apply:submissions:reviews:delete' submission_pk=object.submission.id pk=object.id %}">
+                Delete
+                <svg class="icon icon--delete"><use xlink:href="#delete"></use></svg>
+            </a>
+        </div>
+    {% endif %}
+    {% if perms.funds.change_review or request.user == review.author.reviewer %}
+        <div>
+            <a class="link link--edit-review is-active" href="{% url 'apply:submissions:reviews:edit' submission_pk=object.submission.id pk=object.id %}">
+                Edit
+                <svg class="icon icon--pen"><use xlink:href="#pen"></use></svg>
+            </a>
+        </div>
+    {% endif %}
     {% if not review.for_latest %}
         <div>
             <h5>Review was not against the latest version:</h5>
@@ -29,8 +51,16 @@
 </div>
 
 <div class="rich-text rich-text--answers">
-    {{ object.get_comments_display }}
+    {{ object.get_comments_display|submission_links }}
 
-    {{ object.output_answers }}
+    {{ object.output_answers|submission_links }}
 </div>
+
+{% if form %}
+    <form method="post">
+        {% csrf_token %}
+        {{ form }}
+    </form>
+{% endif %}
+
 {% endblock %}

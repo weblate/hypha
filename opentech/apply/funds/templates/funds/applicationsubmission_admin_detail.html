@@ -1,22 +1,38 @@
 {% extends "funds/applicationsubmission_detail.html" %}
-{% load workflow_tags review_tags determination_tags %}
+{% load static workflow_tags review_tags determination_tags %}
 
-{% block admin_actions %}
-    {% include "funds/includes/actions.html" with mobile=True %}
+{% block extra_css %}
+        <link rel="stylesheet" href="{% static 'css/apply/fancybox.css' %}">
+        {{ reviewer_form.media.css }}
 {% endblock %}
 
-{% block sidebar_forms %}
+{% block mobile_actions %}
+    <a class="js-actions-toggle button button--white button--full-width button--actions">Actions to take</a>
+    <div class="js-actions-sidebar sidebar__inner sidebar__inner--light-blue sidebar__inner--actions sidebar__inner--mobile">
+        {% include "funds/includes/actions.html"  %}
+    </div>
+{% endblock %}
+
+{% block sidebar_top %}
+    <div class="js-actions-sidebar sidebar__inner sidebar__inner--light-blue sidebar__inner--actions {% if mobile %}sidebar__inner--mobile{% endif %}">
         {% include "funds/includes/actions.html" %}
-        {% include "funds/includes/progress_form.html" %}
-        {% include "funds/includes/update_lead_form.html" %}
-        {% include "funds/includes/update_reviewer_form.html" %}
+    </div>
+    {% include "funds/includes/screening_form.html" %}
+    {% include "funds/includes/progress_form.html" %}
+    {% include "funds/includes/update_lead_form.html" %}
+    {% include "funds/includes/update_reviewer_form.html" %}
+    {% include "funds/includes/update_partner_form.html" %}
+    {% if PROJECTS_ENABLED %}
+        {% include "funds/includes/create_project_form.html" %}
+    {% endif %}
+    {% include "funds/includes/update_meta_terms_form.html" %}
 {% endblock %}
 
 {% block reviews %}
     <div class="sidebar__inner">
         <h5>Reviews &amp; assignees</h5>
 
-        {% include 'funds/includes/review_table.html' %}
+        {% include 'funds/includes/review_sidebar.html' %}
 
         <div class="wrapper wrapper--sidebar-buttons">
             {% include 'review/includes/review_button.html' with submission=object class="button--half-width" %}
@@ -27,10 +43,31 @@
     </div>
 {% endblock %}
 
+{% block screening_status %}
+    {% include 'funds/includes/screening_status_block.html' %}
+{% endblock %}
+
+{% block meta_terms %}
+    {% include 'funds/includes/meta_terms_block.html' %}
+{% endblock %}
+
 {% block determination %}
     {% include 'determinations/includes/determination_block.html' with submission=object %}
 {% endblock %}
 
 {% block extra_js %}
-    {{ reviewer_form.media }}
+    {{ reviewer_form.media.js }}
+    {{ comment_form.media.js }}
+    {{ partner_form.media.js }}
+    <script src="//cdnjs.cloudflare.com/ajax/libs/fancybox/3.4.1/jquery.fancybox.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+    <script src="{% static 'js/apply/fancybox-global.js' %}"></script>
+    <script src="{% static 'js/apply/tabs.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-actions-panel.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-reviewers.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-sidebar.js' %}"></script>
+    <script src="{% static 'js/apply/submission-text-cleanup.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-related.js' %}"></script>
+    <script src="{% static 'js/apply/edit-comment.js' %}"></script>
+    <script src="{% static 'js/apply/toggle-proposal-info.js' %}"></script>
 {% endblock %}

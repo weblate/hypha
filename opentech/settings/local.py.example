@@ -1,6 +1,9 @@
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+    },
+    "wagtailcache": {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
     }
 }
 
@@ -22,3 +25,10 @@ CACHES = {
 # BASE_URL = 'http://otf.test'
 
 # SECRET_KEY = 'CHANGEME!!!'
+
+# Enable Wagtail Cache while developing
+# WAGTAIL_CACHE = True
+
+# If you have a problem with "CSRF cookie not set".
+# CSRF_COOKIE_SAMESITE = None
+# SESSION_COOKIE_SAMESITE = None

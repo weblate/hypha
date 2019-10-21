@@ -1,0 +1,74 @@
+<div class="wrapper wrapper--table-actions js-table-actions">
+    <div class="actions-bar">
+        {# Left #}
+        <div class="actions-bar__inner actions-bar__inner--left">
+            {% if heading %}
+                <h4 class="heading heading--normal heading--no-margin">{{ heading }}</h4>
+            {% endif %}
+
+
+            {% if use_batch_actions %}
+                <div class="actions-bar__inner actions-bar__inner--batch-actions">
+                    <p class="actions-bar__total"><span class="js-total-actions">0</span> Selected</p>
+
+                    <button
+                        data-fancybox
+                        type="button"
+                        data-src="#batch-progress"
+                        class="button button--action button--change-status js-batch-button js-batch-progress"
+                        data-tooltip="Status changes can't be applied to submissions with this combination of statuses"
+                    >
+                        <svg><use xlink:href="#arrow-split"></use></svg>
+                        Status
+                    </button>
+
+                    <button data-fancybox data-src="#batch-update-lead" class="button button--action js-batch-button" type="button">
+                        <svg><use xlink:href="#add-person"></use></svg>
+                        Lead
+                    </button>
+
+                    <button data-fancybox data-src="#batch-update-reviewers" class="button button--action js-batch-button" type="button">
+                        <svg><use xlink:href="#add-person"></use></svg>
+                        Reviewers
+                    </button>
+                </div>
+            {% endif %}
+        </div>
+
+        {# Right #}
+        <div class="actions-bar__inner actions-bar__inner--right">
+            <button class="button button--filters js-toggle-filters">Filters</button>
+
+            {% if use_search|default:False %}
+            <form action="{{ search_action }}" method="get" role="search" class="form form--search-desktop">
+                <button class="button button--search" type="submit" aria-label="Search">
+                    <svg class="icon icon--magnifying-glass icon--search"><use xlink:href="#magnifying-glass"></use></svg>
+                </button>
+                <input class="input input--search input--secondary" type="text" placeholder="Search {{ search_placeholder|default:"submissions" }}" name="query"{% if search_term %} value="{{ search_term }}"{% endif %} aria-label="Search input">
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<div class="filters">
+    <div class="filters__header">
+        <button class="filters__button js-clear-filters">Clear</button>
+        <div>Filter by</div>
+        <button class="filters__button js-close-filters">Close</button>
+    </div>
+
+    <form action="{{ filter_action }}" method="get" class="form form--filters js-filter-form">
+        <ul class="form__filters select2">
+            {{ filter.form.as_ul }}
+            <li>
+                <button class="button button--primary" type="submit" value="Filter">Filter</button>
+            </li>
+        </ul>
+    </form>
+</div>
+
+{% include "funds/includes/batch_update_lead_form.html" %}
+{% include "funds/includes/batch_update_reviewer_form.html" %}
+{% include "funds/includes/batch_progress_form.html" %}

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% load wagtailcore_tags wagtailimages_tags navigation_tags static %}
+{% load wagtailcore_tags wagtailimages_tags navigation_tags static markdown_tags bleach_tags %}
 {% block body_class %}light-grey-bg{% endblock %}
 {% block main_class %}wrapper--bottom-space{% endblock %}
 {% block content %}
 <div class="wrapper">
     <section class="section section--main">
-        <h4 class="heading heading--introduction">{{ page.introduction }}</h4>
+        <h4 class="heading heading--introduction">{{ page.introduction|markdown|bleach }}</h4>
 
         {% if subpages.paginator.count %}
             <div class="grid grid--one grid--no-margin">
@@ -14,7 +14,7 @@
                         <a class="card-slim" href="{% pageurl subpage %}">
                             <div class="card-slim__contents">
                                 <div>
-                                    <h3 class="heading heading--no-margin">{{ subpage.listing_title|default:subpage.title }}</h3>
+                                    <h3 class="heading heading--small-margin">{{ subpage.listing_title|default:subpage.title }}</h3>
                                     {% if subpage.listing_summary or subpage.introduction %}
                                         <p class="card-slim__summary">{{ subpage.listing_summary|default:subpage.introduction }}</p>
                                     {% endif %}

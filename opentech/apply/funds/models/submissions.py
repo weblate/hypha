@@ -1,12 +1,24 @@
-import os
 from functools import partialmethod
 
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.postgres.fields import JSONField
 from django.core.exceptions import PermissionDenied
 from django.db import models
-from django.db.models import Count, IntegerField, OuterRef, Subquery, Sum
+from django.db.models import (
+    Case,
+    Count,
+    IntegerField,
+    F,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Sum,
+    When,
+)
 from django.db.models.expressions import RawSQL, OrderBy
 from django.db.models.functions import Coalesce
 from django.dispatch import receiver
@@ -20,22 +32,38 @@ from wagtail.core.fields import StreamField
 from wagtail.contrib.forms.models import AbstractFormSubmission
 
 from opentech.apply.activity.messaging import messenger, MESSAGES
-from opentech.apply.stream_forms.blocks import UploadableMediaBlock
+from opentech.apply.categories.models import MetaTerm
+from opentech.apply.determinations.models import Determination
+from opentech.apply.review.models import ReviewOpinion
+from opentech.apply.review.options import MAYBE, AGREE, DISAGREE
 from opentech.apply.stream_forms.files import StreamFieldDataEncoder
 from opentech.apply.stream_forms.models import BaseStreamForm
 
 from .mixins import AccessFormData
-from .utils import LIMIT_TO_STAFF, LIMIT_TO_STAFF_AND_REVIEWERS, WorkflowHelpers
-from ..blocks import ApplicationCustomFormFieldsBlock, REQUIRED_BLOCK_NAMES
+from .utils import (
+    COMMUNITY_REVIEWER_GROUP_NAME,
+    LIMIT_TO_STAFF,
+    LIMIT_TO_REVIEWER_GROUPS,
+    LIMIT_TO_PARTNERS,
+    PARTNER_GROUP_NAME,
+    REVIEW_GROUPS,
+    REVIEWER_GROUP_NAME,
+    STAFF_GROUP_NAME,
+    WorkflowHelpers,
+)
+from ..blocks import ApplicationCustomFormFieldsBlock, NAMED_BLOCKS
 from ..workflow import (
     active_statuses,
     DETERMINATION_RESPONSE_PHASES,
-    get_review_statuses,
+    get_review_active_statuses,
     INITIAL_STATE,
+    PHASES,
+    PHASES_MAPPING,
     review_statuses,
     STAGE_CHANGE_ACTIONS,
     UserPermissions,
     WORKFLOWS,
+    COMMUNITY_REVIEW_PHASES,
 )
 
 
@@ -50,7 +78,7 @@ class JSONOrderable(models.QuerySet):
 
         def build_json_order_by(field):
             try:
-                if field.replace('-', '') not in REQUIRED_BLOCK_NAMES:
+                if field.replace('-', '') not in NAMED_BLOCKS:
                     return field
             except AttributeError:
                 return field
@@ -60,7 +88,8 @@ class JSONOrderable(models.QuerySet):
                 field = field[1:]
             else:
                 descending = False
-            return OrderBy(RawSQL(f'LOWER({self.json_field}->>%s)', (field,)), descending=descending)
+            db_table = self.model._meta.db_table
+            return OrderBy(RawSQL(f'LOWER({db_table}.{self.json_field}->>%s)', (field,)), descending=descending, nulls_last=True)
 
         field_ordering = [build_json_order_by(field) for field in field_names]
         return super().order_by(*field_ordering)
@@ -75,33 +104,61 @@ class ApplicationSubmissionQueryset(JSONOrderable):
     def inactive(self):
         return self.exclude(status__in=active_statuses)
 
+    def in_community_review(self, user):
+        qs = self.filter(Q(status__in=COMMUNITY_REVIEW_PHASES), ~Q(user=user), ~Q(reviews__author=user) | Q(reviews__is_draft=True))
+        qs = qs.exclude(reviews__opinions__opinion=AGREE, reviews__opinions__author=user)
+        return qs.distinct()
+
     def in_review(self):
         return self.filter(status__in=review_statuses)
 
     def in_review_for(self, user, assigned=True):
-        user_review_statuses = get_review_statuses(user)
-        qs = self.filter(status__in=user_review_statuses).exclude(reviews__author=user)
+        user_review_statuses = get_review_active_statuses(user)
+        qs = self.prefetch_related('reviews__author__reviewer')
+        qs = qs.filter(Q(status__in=user_review_statuses), ~Q(reviews__author__reviewer=user) | Q(reviews__is_draft=True))
         if assigned:
             qs = qs.filter(reviewers=user)
-        return qs
+            # If this user has agreed with a review, then they have reviewed this submission already
+            qs = qs.exclude(reviews__opinions__opinion=AGREE, reviews__opinions__author__reviewer=user)
+        return qs.distinct()
+
+    def reviewed_by(self, user):
+        return self.filter(reviews__author__reviewer=user)
+
+    def partner_for(self, user):
+        return self.filter(partners=user)
 
     def awaiting_determination_for(self, user):
         return self.filter(status__in=DETERMINATION_RESPONSE_PHASES).filter(lead=user)
+
+    def undetermined(self):
+        determined_submissions = Determination.objects.filter(submission__in=self).final().values('submission')
+        return self.exclude(pk__in=determined_submissions)
 
     def current(self):
         # Applications which have the current stage active (have not been progressed)
         return self.exclude(next__isnull=False)
 
-    def for_table(self, user):
-        activities = self.model.activities.field.model
+    def with_latest_update(self):
+        activities = self.model.activities.rel.model
         latest_activity = activities.objects.filter(submission=OuterRef('id')).select_related('user')
-        comments = activities.comments.filter(submission=OuterRef('id')).visible_to(user)
-
-        reviews = self.model.reviews.field.model.objects.filter(submission=OuterRef('id'))
-
         return self.annotate(
             last_user_update=Subquery(latest_activity[:1].values('user__full_name')),
             last_update=Subquery(latest_activity.values('timestamp')[:1]),
+        )
+
+    def for_table(self, user):
+        activities = self.model.activities.rel.model
+        comments = activities.comments.filter(submission=OuterRef('id')).visible_to(user)
+        roles_for_review = self.model.assigned.field.model.objects.with_roles().filter(
+            submission=OuterRef('id'), reviewer=user)
+
+        review_model = self.model.reviews.field.model
+        reviews = review_model.objects.filter(submission=OuterRef('id'))
+        opinions = review_model.opinions.field.model.objects.filter(review__submission=OuterRef('id'))
+        reviewers = self.model.assigned.field.model.objects.filter(submission=OuterRef('id'))
+
+        return self.with_latest_update().annotate(
             comment_count=Coalesce(
                 Subquery(
                     comments.values('submission').order_by().annotate(count=Count('pk')).values('count'),
@@ -109,24 +166,51 @@ class ApplicationSubmissionQueryset(JSONOrderable):
                 ),
                 0,
             ),
-            review_count=Subquery(
-                reviews.values('submission').annotate(count=Count('pk')).values('count'),
+            opinion_disagree=Subquery(
+                opinions.filter(opinion=DISAGREE).values(
+                    'review__submission'
+                ).annotate(count=Count('*')).values('count')[:1],
                 output_field=IntegerField(),
             ),
             review_staff_count=Subquery(
-                reviews.by_staff().values('submission').annotate(count=Count('pk')).values('count'),
+                reviewers.staff().values('submission').annotate(count=Count('pk')).values('count'),
+                output_field=IntegerField(),
+            ),
+            review_count=Subquery(
+                reviewers.values('submission').annotate(count=Count('pk')).values('count'),
                 output_field=IntegerField(),
             ),
             review_submitted_count=Subquery(
-                reviews.submitted().values('submission').annotate(count=Count('pk')).values('count'),
+                reviewers.reviewed().values('submission').annotate(
+                    count=Count('pk', distinct=True)
+                ).values('count'),
                 output_field=IntegerField(),
             ),
-            review_recommendation=Subquery(
-                reviews.submitted().values('submission').annotate(calc_recommendation=Sum('recommendation') / Count('recommendation')).values('calc_recommendation'),
-                output_field=IntegerField(),
+            review_recommendation=Case(
+                When(opinion_disagree__gt=0, then=MAYBE),
+                default=Subquery(
+                    reviews.submitted().values('submission').annotate(
+                        calc_recommendation=Sum('recommendation') / Count('recommendation'),
+                    ).values('calc_recommendation'),
+                    output_field=IntegerField(),
+                )
             ),
+            role_icon=Subquery(roles_for_review[:1].values('role__icon')),
         ).prefetch_related(
-            'reviews__author'
+            Prefetch(
+                'assigned',
+                queryset=AssignedReviewers.objects.reviewed().review_order().select_related(
+                    'reviewer',
+                ).prefetch_related(
+                    Prefetch('review__opinions', queryset=ReviewOpinion.objects.select_related('author')),
+                ),
+                to_attr='has_reviewed'
+            ),
+            Prefetch(
+                'assigned',
+                queryset=AssignedReviewers.objects.not_reviewed().staff(),
+                to_attr='hasnt_reviewed'
+            )
         ).select_related(
             'page',
             'round',
@@ -134,6 +218,7 @@ class ApplicationSubmissionQueryset(JSONOrderable):
             'user',
             'previous__page',
             'previous__round',
+            'previous__lead',
         )
 
 
@@ -227,15 +312,15 @@ class AddTransitions(models.base.ModelBase):
             transition(by=user, request=request, **kwargs)
             self.save(update_fields=['status'])
 
-            self.progress_stage_when_possible(user, request)
+            self.progress_stage_when_possible(user, request, **kwargs)
 
         attrs['perform_transition'] = perform_transition
 
-        def progress_stage_when_possible(self, user, request):
+        def progress_stage_when_possible(self, user, request, notify=None, **kwargs):
             # Check to see if we can progress to a new stage from the current status
             for stage_transition in STAGE_CHANGE_ACTIONS:
                 try:
-                    self.perform_transition(stage_transition, user, request=request, notify=False)
+                    self.perform_transition(stage_transition, user, request=request, notify=False, **kwargs)
                 except PermissionDenied:
                     pass
 
@@ -250,8 +335,8 @@ class ApplicationSubmissionMetaclass(AddTransitions):
 
         # We want to access the redered display of the required fields.
         # Treat in similar way to django's get_FIELD_display
-        for required_name in REQUIRED_BLOCK_NAMES:
-            partial_method_name = f'_{required_name}_method'
+        for block_name in NAMED_BLOCKS:
+            partial_method_name = f'_{block_name}_method'
             # We need to generate the partial method and the wrap it in property so
             # we can access the required fields like normal fields. e.g. self.title
             # Partial method requires __get__ to be called in order to bind it to the
@@ -261,17 +346,17 @@ class ApplicationSubmissionMetaclass(AddTransitions):
             setattr(
                 cls,
                 partial_method_name,
-                partialmethod(cls._get_REQUIRED_value, name=required_name),
+                partialmethod(cls._get_REQUIRED_value, name=block_name),
             )
             setattr(
                 cls,
-                f'{required_name}',
+                f'{block_name}',
                 property(getattr(cls, partial_method_name)),
             )
             setattr(
                 cls,
-                f'get_{required_name}_display',
-                partialmethod(cls._get_REQUIRED_display, name=required_name),
+                f'get_{block_name}_display',
+                partialmethod(cls._get_REQUIRED_display, name=block_name),
             )
         return cls
 
@@ -299,14 +384,39 @@ class ApplicationSubmission(
     reviewers = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name='submissions_reviewer',
-        limit_choices_to=LIMIT_TO_STAFF_AND_REVIEWERS,
         blank=True,
+        through='AssignedReviewers',
+    )
+    partners = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='submissions_partner',
+        limit_choices_to=LIMIT_TO_PARTNERS,
+        blank=True,
+    )
+    meta_terms = models.ManyToManyField(
+        MetaTerm,
+        related_name='submissions',
+        blank=True,
+    )
+    activities = GenericRelation(
+        'activity.Activity',
+        content_type_field='source_content_type',
+        object_id_field='source_object_id',
+        related_query_name='submission',
     )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     search_data = models.TextField()
 
     # Workflow inherited from WorkflowHelpers
     status = FSMField(default=INITIAL_STATE, protected=True)
+
+    screening_status = models.ForeignKey(
+        'funds.ScreeningStatus',
+        related_name='+',
+        on_delete=models.SET_NULL,
+        verbose_name='screening status',
+        null=True,
+    )
 
     is_draft = False
 
@@ -397,14 +507,28 @@ class ApplicationSubmission(
             return getattr(self.page.specific, attribute)
 
     def progress_application(self, **kwargs):
+        target = None
+        for phase in STAGE_CHANGE_ACTIONS:
+            transition = self.get_transition(phase)
+            if can_proceed(transition):
+                # We convert to dict as not concerned about transitions from the first phase
+                # See note in workflow.py
+                target = dict(PHASES)[phase].stage
+        if not target:
+            raise ValueError('Incorrect State for transition')
+
         submission_in_db = ApplicationSubmission.objects.get(id=self.id)
+        prev_meta_terms = submission_in_db.meta_terms.all()
 
         self.id = None
-        self.form_fields = self.get_from_parent('get_defined_fields')(self.stage)
+        proposal_form = kwargs.get('proposal_form')
+        proposal_form = int(proposal_form) if proposal_form else 0
+        self.form_fields = self.get_from_parent('get_defined_fields')(target, form_index=proposal_form)
 
         self.live_revision = None
         self.draft_revision = None
         self.save()
+        self.meta_terms.set(prev_meta_terms)
 
         submission_in_db.next = self
         submission_in_db.save()
@@ -416,7 +540,7 @@ class ApplicationSubmission(
 
     def from_draft(self):
         self.is_draft = True
-        self.form_data = self.deserialised_data(self.draft_revision.form_data, self.form_fields)
+        self.form_data = self.deserialised_data(self, self.draft_revision.form_data, self.form_fields)
         return self
 
     def create_revision(self, draft=False, force=False, by=None, **kwargs):
@@ -449,35 +573,17 @@ class ApplicationSubmission(
         self.process_file_data(self.form_data)
 
     def process_form_data(self):
-        for field_name, field_id in self.must_include.items():
+        for field_name, field_id in self.named_blocks.items():
             response = self.form_data.pop(field_id, None)
             if response:
                 self.form_data[field_name] = response
 
-    def extract_files(self):
-        files = {}
-        for field in self.form_fields:
-            if isinstance(field.block, UploadableMediaBlock):
-                files[field.id] = self.data(field.id) or []
-                self.form_data.pop(field.id, None)
-        return files
-
-    def process_file_data(self, data):
-        for field in self.form_fields:
-            if isinstance(field.block, UploadableMediaBlock):
-                file = self.process_file(data.get(field.id, []))
-                folder = os.path.join('submission', str(self.id), field.id)
-                try:
-                    file.save(folder)
-                except AttributeError:
-                    for f in file:
-                        f.save(folder)
-                self.form_data[field.id] = file
-
-    def save(self, *args, update_fields=list(), **kwargs):
+    def save(self, *args, update_fields=list(), skip_custom=False, **kwargs):
         if update_fields and 'form_data' not in update_fields:
             # We don't want to use this approach if the user is sending data
             return super().save(*args, update_fields=update_fields, **kwargs)
+        elif skip_custom:
+            return super().save(*args, **kwargs)
 
         if self.is_draft:
             raise ValueError('Cannot save with draft data')
@@ -502,7 +608,11 @@ class ApplicationSubmission(
 
         if creating:
             self.process_file_data(files)
-            self.reviewers.set(self.get_from_parent('reviewers').all())
+            for reviewer in self.get_from_parent('reviewers').all():
+                AssignedReviewers.objects.get_or_create_for_user(
+                    reviewer=reviewer,
+                    submission=self
+                )
             first_revision = ApplicationRevision.objects.create(
                 submission=self,
                 form_data=self.form_data,
@@ -513,8 +623,15 @@ class ApplicationSubmission(
             self.save()
 
     @property
+    def community_review(self):
+        return self.status in COMMUNITY_REVIEW_PHASES
+
+    @property
     def missing_reviewers(self):
-        return self.reviewers.exclude(id__in=self.reviews.submitted().values('author'))
+        reviewers_submitted = self.assigned.reviewed().values('reviewer')
+        reviewers = self.reviewers.exclude(id__in=reviewers_submitted)
+        partners = self.partners.exclude(id__in=reviewers_submitted)
+        return reviewers.union(partners)
 
     @property
     def staff_not_reviewed(self):
@@ -524,14 +641,24 @@ class ApplicationSubmission(
     def reviewers_not_reviewed(self):
         return self.missing_reviewers.reviewers().exclude(id__in=self.staff_not_reviewed)
 
+    @property
+    def partners_not_reviewed(self):
+        return self.missing_reviewers.partners().exclude(id__in=self.staff_not_reviewed)
+
     def reviewed_by(self, user):
-        return self.reviews.submitted().filter(author=user).exists()
+        return self.assigned.reviewed().filter(reviewer=user).exists()
 
     def has_permission_to_review(self, user):
         if user.is_apply_staff:
             return True
 
         if user in self.reviewers_not_reviewed:
+            return True
+
+        if user in self.partners_not_reviewed:
+            return True
+
+        if user.is_community_reviewer and self.user != user and self.community_review and not self.reviewed_by(user):
             return True
 
         return False
@@ -554,7 +681,7 @@ class ApplicationSubmission(
                     yield value
 
         # Add named fields into the search index
-        for field in ['email', 'title']:
+        for field in ['full_name', 'email', 'title']:
             yield getattr(self, field)
 
     def get_absolute_url(self):
@@ -565,6 +692,22 @@ class ApplicationSubmission(
 
     def __repr__(self):
         return f'<{self.__class__.__name__}: {self.user}, {self.round}, {self.page}>'
+
+    @property
+    def accepted_for_funding(self):
+        accepted = self.status in PHASES_MAPPING['accepted']['statuses']
+        return self.in_final_stage and accepted
+
+    @property
+    def in_final_stage(self):
+        stages = self.workflow.stages
+
+        stage_index = stages.index(self.stage)
+
+        # adjust the index since list.index() is zero-based
+        adjusted_index = stage_index + 1
+
+        return adjusted_index == len(stages)
 
     # Methods for accessing data on the submission
 
@@ -582,7 +725,7 @@ class ApplicationSubmission(
         return self.render_answer(name)
 
     def _get_REQUIRED_value(self, name):
-        return self.form_data[name]
+        return self.data(name)
 
 
 @receiver(post_transition, sender=ApplicationSubmission)
@@ -599,7 +742,7 @@ def log_status_update(sender, **kwargs):
             MESSAGES.TRANSITION,
             user=by,
             request=request,
-            submission=instance,
+            source=instance,
             related=old_phase,
         )
 
@@ -608,7 +751,7 @@ def log_status_update(sender, **kwargs):
                 MESSAGES.READY_FOR_REVIEW,
                 user=by,
                 request=request,
-                submission=instance,
+                source=instance,
             )
 
     if instance.status in STAGE_CHANGE_ACTIONS:
@@ -616,11 +759,11 @@ def log_status_update(sender, **kwargs):
             MESSAGES.INVITED_TO_PROPOSAL,
             request=request,
             user=by,
-            submission=instance,
+            source=instance,
         )
 
 
-class ApplicationRevision(AccessFormData, models.Model):
+class ApplicationRevision(BaseStreamForm, AccessFormData, models.Model):
     submission = models.ForeignKey(ApplicationSubmission, related_name='revisions', on_delete=models.CASCADE)
     form_data = JSONField(encoder=StreamFieldDataEncoder)
     timestamp = models.DateTimeField(auto_now=True)
@@ -628,6 +771,9 @@ class ApplicationRevision(AccessFormData, models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+
+    def __str__(self):
+        return f'Revision for {self.submission.title} by {self.author} '
 
     @property
     def form_fields(self):
@@ -648,3 +794,176 @@ class ApplicationRevision(AccessFormData, models.Model):
             'to': self.id,
             'from': previous_revision.id,
         })
+
+
+class AssignedReviewersQuerySet(models.QuerySet):
+    def review_order(self):
+        review_order = [
+            STAFF_GROUP_NAME,
+            PARTNER_GROUP_NAME,
+            COMMUNITY_REVIEWER_GROUP_NAME,
+            REVIEWER_GROUP_NAME,
+        ]
+
+        ordering = [
+            models.When(type__name=review_type, then=models.Value(i))
+            for i, review_type in enumerate(review_order)
+        ]
+        return self.exclude(
+            # Remove people from the list who are opinionated but
+            # didn't review, they appear elsewhere
+            opinions__isnull=False,
+            review__isnull=True,
+        ).annotate(
+            type_order=models.Case(
+                *ordering,
+                output_field=models.IntegerField(),
+            ),
+            has_review=models.Case(
+                models.When(review__isnull=True, then=models.Value(1)),
+                models.When(review__is_draft=True, then=models.Value(1)),
+                default=models.Value(0),
+                output_field=models.IntegerField(),
+            )
+        ).order_by(
+            'type_order',
+            'has_review',
+            F('role__order').asc(nulls_last=True),
+        ).select_related(
+            'reviewer',
+            'role',
+        )
+
+    def with_roles(self):
+        return self.filter(role__isnull=False)
+
+    def without_roles(self):
+        return self.filter(role__isnull=True)
+
+    def reviewed(self):
+        return self.filter(
+            Q(opinions__opinion=AGREE) |
+            Q(Q(review__isnull=False) & Q(review__is_draft=False))
+        ).distinct()
+
+    def draft_reviewed(self):
+        return self.filter(
+            Q(Q(review__isnull=False) & Q(review__is_draft=True))
+        ).distinct()
+
+    def not_reviewed(self):
+        return self.filter(
+            Q(review__isnull=True) | Q(review__is_draft=True),
+            Q(opinions__isnull=True) | Q(opinions__opinion=DISAGREE),
+        ).distinct()
+
+    def never_tried_to_review(self):
+        # Different from not reviewed as draft reviews allowed
+        return self.filter(
+            review__isnull=True,
+            opinions__isnull=True,
+        ).distinct()
+
+    def staff(self):
+        return self.filter(type__name=STAFF_GROUP_NAME)
+
+    def get_or_create_for_user(self, submission, reviewer):
+        groups = set(reviewer.groups.values_list('name', flat=True)) & set(REVIEW_GROUPS)
+        if len(groups) > 1:
+            if PARTNER_GROUP_NAME in groups and reviewer in submission.partners.all():
+                groups = {PARTNER_GROUP_NAME}
+            elif COMMUNITY_REVIEWER_GROUP_NAME in groups:
+                groups = {COMMUNITY_REVIEWER_GROUP_NAME}
+            elif reviewer.is_apply_staff:
+                groups = {STAFF_GROUP_NAME}
+            else:
+                groups = {REVIEWER_GROUP_NAME}
+        elif not groups:
+            if reviewer.is_staff or reviewer.is_superuser:
+                groups = {STAFF_GROUP_NAME}
+            else:
+                groups = {REVIEWER_GROUP_NAME}
+
+        group = Group.objects.get(name=groups.pop())
+
+        return self.get_or_create(
+            submission=submission,
+            reviewer=reviewer,
+            type=group,
+        )
+
+    def get_or_create_staff(self, submission, reviewer):
+        return self.get_or_create(
+            submission=submission,
+            reviewer=reviewer,
+            type=Group.objects.get(name=STAFF_GROUP_NAME),
+        )
+
+    def bulk_create_reviewers(self, reviewers, submission):
+        group = Group.objects.get(name=REVIEWER_GROUP_NAME)
+        self.bulk_create(
+            self.model(
+                submission=submission,
+                role=None,
+                reviewer=reviewer,
+                type=group,
+            ) for reviewer in reviewers
+        )
+
+    def update_role(self, role, reviewer, *submissions):
+        # Remove role who didn't review
+        self.filter(submission__in=submissions, role=role).never_tried_to_review().delete()
+        # Anyone else we remove their role
+        self.filter(submission__in=submissions, role=role).update(role=None)
+        # Create/update the new role reviewers
+        group = Group.objects.get(name=STAFF_GROUP_NAME)
+        for submission in submissions:
+            self.update_or_create(
+                submission=submission,
+                reviewer=reviewer,
+                defaults={'role': role, 'type': group},
+            )
+
+
+class AssignedReviewers(models.Model):
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        limit_choices_to=LIMIT_TO_REVIEWER_GROUPS,
+    )
+    type = models.ForeignKey(
+        'auth.Group',
+        on_delete=models.PROTECT,
+    )
+    submission = models.ForeignKey(
+        ApplicationSubmission,
+        related_name='assigned',
+        on_delete=models.CASCADE
+    )
+    role = models.ForeignKey(
+        'funds.ReviewerRole',
+        related_name='+',
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+
+    objects = AssignedReviewersQuerySet.as_manager()
+
+    class Meta:
+        unique_together = (('submission', 'role'), ('submission', 'reviewer'))
+
+    def __str__(self):
+        return f'{self.reviewer}'
+
+    def __eq__(self, other):
+        if not isinstance(other, models.Model):
+            return False
+        if self._meta.concrete_model != other._meta.concrete_model:
+            return False
+        my_pk = self.pk
+        if my_pk is None:
+            return self is other
+        return all([
+            self.reviewer_id == other.reviewer_id,
+            self.role_id == other.role_id,
+        ])

@@ -8,18 +8,26 @@ from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from opentech.apply.funds.models import ApplicationSubmission
 from opentech.apply.funds.blocks import EmailBlock, FullNameBlock
 from opentech.apply.funds.workflow import Request
+from opentech.apply.review.tests.factories import ReviewFactory, ReviewOpinionFactory
+from opentech.apply.review.options import NO, MAYBE
 from opentech.apply.utils.testing import make_request
+from opentech.apply.users.tests.factories import StaffFactory
 
 from .factories import (
     ApplicationSubmissionFactory,
+    AssignedReviewersFactory,
     CustomFormFieldsFactory,
     FundTypeFactory,
+    InvitedToProposalFactory,
     LabFactory,
+    RequestForPartnersFactory,
     RoundFactory,
+    TodayRoundFactory,
 )
 
 
@@ -244,6 +252,12 @@ class TestFormSubmission(TestCase):
         self.assertEqual(ApplicationSubmission.objects.count(), 1)
         self.assertEqual(ApplicationSubmission.objects.first().user, new_user)
 
+    def test_doesnt_mess_with_name(self):
+        full_name = "I have; <a> wei'rd name"
+        self.submit_form(name=full_name)
+        submission = ApplicationSubmission.objects.first()
+        self.assertEqual(submission.user.full_name, full_name)
+
     def test_associated_if_not_new(self):
         self.submit_form()
         self.submit_form()
@@ -297,6 +311,11 @@ class TestFormSubmission(TestCase):
         self.assertEqual(self.User.objects.count(), 2)
 
         self.assertEqual(ApplicationSubmission.objects.count(), 0)
+
+    def test_valid_email(self):
+        email = 'not_a_valid_email@'
+        response = self.submit_form(email=email, ignore_errors=True)
+        self.assertContains(response, 'Enter a valid email address')
 
     @override_settings(SEND_MESSAGES=True)
     def test_email_sent_to_user_on_submission_fund(self):
@@ -435,12 +454,20 @@ class TestApplicationSubmission(TestCase):
         submission.create_revision(draft=True)
         self.assertEqual(submission.revisions.count(), 2)
 
+    def test_in_final_stage(self):
+        submission = InvitedToProposalFactory().previous
+        self.assertFalse(submission.in_final_stage)
 
+        submission = InvitedToProposalFactory()
+        self.assertTrue(submission.in_final_stage)
+
+
+@override_settings(ROOT_URLCONF='opentech.apply.urls')
 class TestSubmissionRenderMethods(TestCase):
-    def test_must_include_not_included_in_answers(self):
+    def test_named_blocks_not_included_in_answers(self):
         submission = ApplicationSubmissionFactory()
-        answers = submission.render_answers()
-        for name in submission.must_include:
+        answers = submission.output_answers()
+        for name in submission.named_blocks:
             field = submission.field(name)
             self.assertNotIn(field.value['field_label'], answers)
 
@@ -448,7 +475,7 @@ class TestSubmissionRenderMethods(TestCase):
         submission = ApplicationSubmissionFactory()
         answers = submission.output_answers()
         for field_name in submission.question_field_ids:
-            if field_name not in submission.must_include:
+            if field_name not in submission.named_blocks:
                 field = submission.field(field_name)
                 self.assertIn(field.value['field_label'], answers)
 
@@ -457,5 +484,156 @@ class TestSubmissionRenderMethods(TestCase):
         submission = ApplicationSubmissionFactory(
             form_fields__text_markup__value=rich_text_label
         )
-        answers = submission.render_answers()
+        answers = submission.output_answers()
         self.assertNotIn(rich_text_label, answers)
+
+    def test_named_blocks_dont_break_if_no_response(self):
+        submission = ApplicationSubmissionFactory()
+
+        # the user didn't respond
+        del submission.form_data['value']
+
+        # value doesnt sneak into raw_data
+        self.assertTrue('value' not in submission.raw_data)
+
+        # value field_id gone
+        field_id = submission.get_definitive_id('value')
+        self.assertTrue(field_id not in submission.raw_data)
+
+        # value attr is None
+        self.assertIsNone(submission.value)
+
+    def test_file_private_url_included(self):
+        submission = ApplicationSubmissionFactory()
+        answers = submission.output_answers()
+        for file_id in submission.file_field_ids:
+
+            def file_url_in_answers(file_to_test):
+                url = reverse(
+                    'apply:submissions:serve_private_media', kwargs={
+                        'pk': submission.pk,
+                        'field_id': file_id,
+                        'file_name': file_to_test.basename,
+                    }
+                )
+                self.assertIn(url, answers)
+
+            file_response = submission.data(file_id)
+            if isinstance(file_response, list):
+                for stream_file in file_response:
+                    file_url_in_answers(stream_file)
+            else:
+                file_url_in_answers(file_response)
+
+
+class TestRequestForPartners(TestCase):
+    def test_message_when_no_round(self):
+        rfp = RequestForPartnersFactory()
+        request = make_request(site=rfp.get_site())
+        response = rfp.serve(request)
+        self.assertContains(response, 'not accepting')
+        self.assertNotContains(response, 'Submit')
+
+    def test_form_when_round(self):
+        rfp = RequestForPartnersFactory()
+        TodayRoundFactory(parent=rfp)
+        request = make_request(site=rfp.get_site())
+        response = rfp.serve(request)
+        self.assertNotContains(response, 'not accepting')
+        self.assertContains(response, 'Submit')
+
+
+class TestForTableQueryset(TestCase):
+    def test_assigned_but_not_reviewed(self):
+        staff = StaffFactory()
+        submission = ApplicationSubmissionFactory()
+        AssignedReviewersFactory(submission=submission, reviewer=staff)
+
+        qs = ApplicationSubmission.objects.for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission.opinion_disagree, None)
+        self.assertEqual(submission.review_count, 1)
+        self.assertEqual(submission.review_submitted_count, None)
+        self.assertEqual(submission.review_recommendation, None)
+
+    def test_review_outcome(self):
+        staff = StaffFactory()
+        submission = ApplicationSubmissionFactory()
+        ReviewFactory(submission=submission)
+        qs = ApplicationSubmission.objects.for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission.opinion_disagree, None)
+        self.assertEqual(submission.review_count, 1)
+        self.assertEqual(submission.review_submitted_count, 1)
+        self.assertEqual(submission.review_recommendation, NO)
+
+    def test_disagree_review_is_maybe(self):
+        staff = StaffFactory()
+        submission = ApplicationSubmissionFactory()
+        review = ReviewFactory(submission=submission)
+        ReviewOpinionFactory(opinion_disagree=True, review=review)
+        qs = ApplicationSubmission.objects.for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission.opinion_disagree, 1)
+        self.assertEqual(submission.review_count, 2)
+        # Reviewers that disagree are not counted
+        self.assertEqual(submission.review_submitted_count, 1)
+        self.assertEqual(submission.review_recommendation, MAYBE)
+
+    def test_opinionated_slash_confused_reviewer(self):
+        staff = StaffFactory()
+        submission = ApplicationSubmissionFactory()
+        review_one = ReviewFactory(submission=submission)
+        review_two = ReviewFactory(submission=submission)
+        ReviewOpinionFactory(opinion_disagree=True, review=review_one, author__reviewer=staff)
+        ReviewOpinionFactory(opinion_agree=True, review=review_two, author__reviewer=staff)
+        qs = ApplicationSubmission.objects.for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission.opinion_disagree, 1)
+        self.assertEqual(submission.review_count, 3)
+        # Reviewers that disagree are not counted
+        self.assertEqual(submission.review_submitted_count, 3)
+        self.assertEqual(submission.review_recommendation, MAYBE)
+
+    def test_dont_double_count_review_and_opinion(self):
+        staff = StaffFactory()
+        submission = ApplicationSubmissionFactory()
+
+        review = ReviewFactory(submission=submission, author__reviewer=staff, author__staff=True)
+        opinion = ReviewOpinionFactory(opinion_disagree=True, review=review)
+
+        # Another pair of review/opinion
+        review_two = ReviewFactory(author=opinion.author, submission=submission)
+        ReviewOpinionFactory(opinion_disagree=True, author__reviewer=staff, author__staff=True, review=review_two)
+
+        qs = ApplicationSubmission.objects.for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission.opinion_disagree, 2)
+        self.assertEqual(submission.review_count, 2)
+        self.assertEqual(submission.review_submitted_count, 2)
+        self.assertEqual(submission.review_recommendation, MAYBE)
+
+    def test_submissions_dont_conflict(self):
+        staff = StaffFactory()
+        submission_one = ApplicationSubmissionFactory()
+        submission_two = ApplicationSubmissionFactory()
+        review_one = ReviewFactory(submission=submission_one)
+        ReviewOpinionFactory(opinion_disagree=True, review=review_one)
+
+        ReviewFactory(submission=submission_two)
+
+        qs = ApplicationSubmission.objects.order_by('pk').for_table(user=staff)
+        submission = qs[0]
+        self.assertEqual(submission, submission_one)
+        self.assertEqual(submission.opinion_disagree, 1)
+        self.assertEqual(submission.review_count, 2)
+        # Reviewers that disagree are not counted
+        self.assertEqual(submission.review_submitted_count, 1)
+        self.assertEqual(submission.review_recommendation, MAYBE)
+
+        submission = qs[1]
+        self.assertEqual(submission, submission_two)
+        self.assertEqual(submission.opinion_disagree, None)
+        self.assertEqual(submission.review_count, 1)
+        self.assertEqual(submission.review_submitted_count, 1)
+        self.assertEqual(submission.review_recommendation, NO)

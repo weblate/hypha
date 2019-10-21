@@ -1,18 +1,36 @@
+from django.contrib.auth.hashers import make_password
+from django.contrib.auth.models import AbstractUser, BaseUserManager, Group
 from django.db import models
-from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.db.models import Q
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
-from .groups import REVIEWER_GROUP_NAME, STAFF_GROUP_NAME
+from .groups import (APPLICANT_GROUP_NAME, APPROVER_GROUP_NAME,
+                     COMMUNITY_REVIEWER_GROUP_NAME, PARTNER_GROUP_NAME,
+                     REVIEWER_GROUP_NAME, STAFF_GROUP_NAME)
 from .utils import send_activation_email
 
 
 class UserQuerySet(models.QuerySet):
     def staff(self):
-        return self.filter(groups__name=STAFF_GROUP_NAME)
+        return self.filter(
+            Q(groups__name=STAFF_GROUP_NAME) | Q(is_superuser=True)
+        ).distinct()
 
     def reviewers(self):
         return self.filter(groups__name=REVIEWER_GROUP_NAME)
+
+    def partners(self):
+        return self.filter(groups__name=PARTNER_GROUP_NAME)
+
+    def community_reviewers(self):
+        return self.filter(groups__name=COMMUNITY_REVIEWER_GROUP_NAME)
+
+    def applicants(self):
+        return self.filter(groups__name=APPLICANT_GROUP_NAME)
+
+    def approvers(self):
+        return self.filter(groups__name=APPROVER_GROUP_NAME)
 
 
 class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
@@ -47,10 +65,16 @@ class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
         return self._create_user(email, password, **extra_fields)
 
     def get_or_create_and_notify(self, defaults=dict(), site=None, **kwargs):
-        defaults.update(is_active=False)
+        # Set a temp password so users can access the password reset function if needed.
+        temp_pass = BaseUserManager().make_random_password(length=32)
+        temp_pass_hash = make_password(temp_pass)
+        defaults.update(password=temp_pass_hash)
         user, created = self.get_or_create(defaults=defaults, **kwargs)
         if created:
             send_activation_email(user, site)
+            applicant_group = Group.objects.get(name=APPLICANT_GROUP_NAME)
+            user.groups.add(applicant_group)
+            user.save()
         return user, created
 
 
@@ -87,6 +111,10 @@ class User(AbstractUser):
         return self.email
 
     @cached_property
+    def roles(self):
+        return list(self.groups.values_list('name', flat=True))
+
+    @cached_property
     def is_apply_staff(self):
         return self.groups.filter(name=STAFF_GROUP_NAME).exists() or self.is_superuser
 
@@ -95,8 +123,20 @@ class User(AbstractUser):
         return self.groups.filter(name=REVIEWER_GROUP_NAME).exists()
 
     @cached_property
+    def is_partner(self):
+        return self.groups.filter(name=PARTNER_GROUP_NAME).exists()
+
+    @cached_property
+    def is_community_reviewer(self):
+        return self.groups.filter(name=COMMUNITY_REVIEWER_GROUP_NAME).exists()
+
+    @cached_property
     def is_applicant(self):
-        return not self.is_apply_staff and not self.is_reviewer
+        return self.groups.filter(name=APPLICANT_GROUP_NAME).exists()
+
+    @cached_property
+    def is_approver(self):
+        return self.groups.filter(name=APPROVER_GROUP_NAME).exists()
 
     class Meta:
         ordering = ('full_name', 'email')

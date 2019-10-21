@@ -6,10 +6,13 @@ import wagtail_factories
 from opentech.apply.funds.models import (
     ApplicationSubmission,
     ApplicationRevision,
+    AssignedReviewers,
     FundType,
     LabType,
     RequestForPartners,
+    ReviewerRole,
     Round,
+    ScreeningStatus,
     SealedRound,
 )
 from opentech.apply.funds.models.forms import (
@@ -21,9 +24,11 @@ from opentech.apply.funds.models.forms import (
     RoundBaseForm,
     RoundBaseReviewForm,
 )
-from opentech.apply.users.tests.factories import StaffFactory, UserFactory
-from opentech.apply.stream_forms.testing.factories import FormDataFactory
+from opentech.apply.funds.workflow import ConceptProposal, Request
 from opentech.apply.home.factories import ApplyHomePageFactory
+from opentech.apply.stream_forms.testing.factories import FormDataFactory
+from opentech.apply.users.groups import STAFF_GROUP_NAME, REVIEWER_GROUP_NAME
+from opentech.apply.users.tests.factories import StaffFactory, ApplicantFactory, GroupFactory
 
 from . import blocks
 
@@ -34,20 +39,29 @@ __all__ = [
     'ApplicationFormFactory',
     'ApplicationRevisionFactory',
     'ApplicationSubmissionFactory',
+    'AssignedReviewersFactory',
+    'AssignedWithRoleReviewersFactory',
     'InvitedToProposalFactory',
     'RoundFactory',
     'RoundBaseFormFactory',
     'LabFactory',
     'LabBaseFormFactory',
     'LabSubmissionFactory',
+    'RequestForPartnersFactory',
+    'ScreeningStatusFactory',
     'SealedRoundFactory',
     'SealedSubmissionFactory',
+    'ReviewerRoleFactory',
+    'TodayRoundFactory',
     'workflow_for_stages',
 ]
 
 
 def workflow_for_stages(stages):
-    return list(FundType.WORKFLOW_CHOICES.keys())[stages - 1]
+    return {
+        1: Request.admin_name,
+        2: ConceptProposal.admin_name,
+    }[stages]
 
 
 class AbstractApplicationFactory(wagtail_factories.PageFactory):
@@ -61,6 +75,7 @@ class AbstractApplicationFactory(wagtail_factories.PageFactory):
 
     # Will need to update how the stages are identified as Fund Page changes
     workflow_name = factory.LazyAttribute(lambda o: workflow_for_stages(o.workflow_stages))
+    approval_form = factory.SubFactory('opentech.apply.projects.tests.factories.ProjectApprovalFormFactory')
 
     @factory.post_generation
     def parent(self, create, extracted_parent, **parent_kwargs):
@@ -69,21 +84,18 @@ class AbstractApplicationFactory(wagtail_factories.PageFactory):
             if extracted_parent and parent_kwargs:
                 raise ValueError('Cant pass a parent instance and attributes')
 
-            if not extracted_parent:
-                parent = ApplyHomePageFactory(**parent_kwargs)
-            else:
-                # Assume root node if no parent passed
-                parent = extracted_parent
+            parent = extracted_parent or ApplyHomePageFactory(**parent_kwargs)
 
             parent.add_child(instance=self)
 
     @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            for _ in self.workflow.stages:
+            for index, _ in enumerate(self.workflow.stages, 1):
                 # Generate a form based on all defined fields on the model
                 ApplicationBaseFormFactory(
                     application=self,
+                    stage=index,
                     **kwargs,
                 )
                 ApplicationBaseReviewForm(
@@ -131,6 +143,10 @@ class RoundFactory(wagtail_factories.PageFactory):
             start_date=factory.LazyFunction(datetime.date.today),
             end_date=factory.LazyFunction(lambda: datetime.date.today() + datetime.timedelta(days=7)),
         )
+        closed = factory.Trait(
+            start_date=factory.LazyFunction(lambda: datetime.date.today() - datetime.timedelta(days=7)),
+            end_date=factory.LazyFunction(lambda: datetime.date.today() - datetime.timedelta(days=1)),
+        )
 
     title = factory.Sequence('Round {}'.format)
     start_date = factory.Sequence(lambda n: datetime.date.today() + datetime.timedelta(days=7 * n + 1))
@@ -138,12 +154,19 @@ class RoundFactory(wagtail_factories.PageFactory):
     lead = factory.SubFactory(StaffFactory)
 
     @factory.post_generation
+    def parent(self, create, extracted_parent, **parent_kwargs):
+        if create:
+            parent = extracted_parent or FundTypeFactory(**parent_kwargs)
+            parent.add_child(instance=self)
+
+    @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            for _ in self.workflow.stages:
+            for index, _ in enumerate(self.workflow.stages, 1):
                 # Generate a form based on all defined fields on the model
                 RoundBaseFormFactory(
                     round=self,
+                    stage=index,
                     **kwargs,
                 )
                 RoundBaseReviewFormFactory(
@@ -177,10 +200,11 @@ class LabFactory(AbstractApplicationFactory):
     @factory.post_generation
     def forms(self, create, extracted, **kwargs):
         if create:
-            for _ in self.workflow.stages:
+            for index, _ in enumerate(self.workflow.stages, 1):
                 # Generate a form based on all defined fields on the model
                 LabBaseFormFactory(
                     lab=self,
+                    stage=index,
                     **kwargs,
                 )
                 LabBaseReviewFormFactory(
@@ -214,14 +238,14 @@ class ApplicationSubmissionFactory(factory.DjangoModelFactory):
         ApplicationFormDataFactory,
         form_fields=factory.SelfAttribute('..form_fields'),
     )
-    page = factory.SubFactory(FundTypeFactory)
+    page = factory.SelfAttribute('.round.fund')
     workflow_name = factory.LazyAttribute(lambda o: workflow_for_stages(o.workflow_stages))
     round = factory.SubFactory(
         RoundFactory,
         workflow_name=factory.SelfAttribute('..workflow_name'),
         lead=factory.SelfAttribute('..lead'),
     )
-    user = factory.SubFactory(UserFactory)
+    user = factory.SubFactory(ApplicantFactory)
     lead = factory.SubFactory(StaffFactory)
     live_revision = None
     draft_revision = None
@@ -229,7 +253,37 @@ class ApplicationSubmissionFactory(factory.DjangoModelFactory):
     @factory.post_generation
     def reviewers(self, create, reviewers, **kwargs):
         if create and reviewers:
-            self.reviewers.set(reviewers)
+            for reviewer in reviewers:
+                AssignedReviewers.objects.get_or_create_for_user(
+                    reviewer=reviewer,
+                    submission=self,
+                )
+
+
+class ReviewerRoleFactory(factory.DjangoModelFactory):
+    class Meta:
+        model = ReviewerRole
+
+    name = factory.Faker('word')
+    order = factory.Sequence(lambda n: n)
+
+
+class AssignedReviewersFactory(factory.DjangoModelFactory):
+    class Meta:
+        model = AssignedReviewers
+        django_get_or_create = ('submission', 'reviewer')
+
+    class Params:
+        staff = factory.Trait(type=factory.SubFactory(GroupFactory, name=STAFF_GROUP_NAME))
+
+    submission = factory.SubFactory(ApplicationSubmissionFactory)
+    role = None
+    reviewer = factory.SubFactory(StaffFactory)
+    type = factory.SubFactory(GroupFactory, name=REVIEWER_GROUP_NAME)
+
+
+class AssignedWithRoleReviewersFactory(AssignedReviewersFactory):
+    role = factory.SubFactory(ReviewerRoleFactory)
 
 
 class InvitedToProposalFactory(ApplicationSubmissionFactory):
@@ -302,3 +356,10 @@ class LabBaseReviewFormFactory(AbstractReviewFormFactory):
         model = LabBaseReviewForm
 
     lab = factory.SubFactory(LabFactory)
+
+
+class ScreeningStatusFactory(factory.DjangoModelFactory):
+    class Meta:
+        model = ScreeningStatus
+
+    title = factory.Iterator(["Bad", "Good"])

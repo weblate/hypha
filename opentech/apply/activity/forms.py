@@ -2,6 +2,8 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.safestring import mark_safe
 
+from pagedown.widgets import PagedownWidget
+
 from .models import Activity, VISIBILILTY_HELP_TEXT, VISIBILITY
 
 
@@ -10,11 +12,12 @@ class CommentForm(forms.ModelForm):
         model = Activity
         fields = ('message', 'visibility')
         labels = {
-            'visibility': '',
+            'visibility': 'Visible to',
             'message': '',
         }
         widgets = {
             'visibility': forms.RadioSelect(),
+            'message': PagedownWidget(),
         }
 
     def __init__(self, *args, user=None, **kwargs):

@@ -1,26 +1,24 @@
-from django.conf import settings
 from django.contrib.postgres.fields import JSONField
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
 from django.urls import reverse
+from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 from wagtail.admin.edit_handlers import FieldPanel, StreamFieldPanel
 from wagtail.core.fields import StreamField
 
 from opentech.apply.funds.models.mixins import AccessFormData
-from opentech.apply.review.options import YES, NO, MAYBE, RECOMMENDATION_CHOICES
 from opentech.apply.stream_forms.models import BaseStreamForm
-from opentech.apply.users.models import User
+from opentech.apply.users.groups import STAFF_GROUP_NAME, REVIEWER_GROUP_NAME, PARTNER_GROUP_NAME
 
 from .blocks import (
     ReviewCustomFormFieldsBlock,
     RecommendationBlock,
     RecommendationCommentsBlock,
     ScoreFieldBlock,
+    VisibilityBlock,
 )
-from .options import NA
+from .options import NA, YES, NO, MAYBE, RECOMMENDATION_CHOICES, DISAGREE, OPINION_CHOICES, VISIBILITY, PRIVATE, REVIEWER
 
 
 class ReviewFormFieldsMixin(models.Model):
@@ -36,6 +34,10 @@ class ReviewFormFieldsMixin(models.Model):
     @property
     def recommendation_field(self):
         return self._get_field_type(RecommendationBlock)
+
+    @property
+    def visibility_field(self):
+        return self._get_field_type(VisibilityBlock)
 
     @property
     def comment_field(self):
@@ -72,11 +74,17 @@ class ReviewQuerySet(models.QuerySet):
     def submitted(self):
         return self.filter(is_draft=False)
 
+    def _by_group(self, group):
+        return self.select_related('author__type').filter(author__type__name=group)
+
     def by_staff(self):
-        return self.submitted().filter(author__in=User.objects.staff())
+        return self.submitted()._by_group(STAFF_GROUP_NAME)
 
     def by_reviewers(self):
-        return self.submitted().filter(author__in=User.objects.reviewers())
+        return self.submitted()._by_group(REVIEWER_GROUP_NAME)
+
+    def by_partners(self):
+        return self.submitted()._by_group(PARTNER_GROUP_NAME)
 
     def staff_score(self):
         return self.by_staff().score()
@@ -94,6 +102,11 @@ class ReviewQuerySet(models.QuerySet):
         return self.exclude(score=NA).aggregate(models.Avg('score'))['score__avg']
 
     def recommendation(self):
+        opinions = self.values_list('opinions__opinion', flat=True)
+
+        if any(opinion == DISAGREE for opinion in opinions):
+            return MAYBE
+
         recommendations = self.values_list('recommendation', flat=True)
         try:
             recommendation = sum(recommendations) / len(recommendations)
@@ -106,13 +119,17 @@ class ReviewQuerySet(models.QuerySet):
         else:
             return MAYBE
 
+    def opinions(self):
+        return ReviewOpinion.objects.filter(review__id__in=self.values_list('id'))
+
 
 class Review(ReviewFormFieldsMixin, BaseStreamForm, AccessFormData, models.Model):
     submission = models.ForeignKey('funds.ApplicationSubmission', on_delete=models.CASCADE, related_name='reviews')
     revision = models.ForeignKey('funds.ApplicationRevision', on_delete=models.SET_NULL, related_name='reviews', null=True)
-    author = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+    author = models.OneToOneField(
+        'funds.AssignedReviewers',
+        related_name='review',
+        on_delete=models.CASCADE,
     )
 
     form_data = JSONField(default=dict, encoder=DjangoJSONEncoder)
@@ -122,6 +139,7 @@ class Review(ReviewFormFieldsMixin, BaseStreamForm, AccessFormData, models.Model
     is_draft = models.BooleanField(default=False, verbose_name=_("Draft"))
     created_at = models.DateTimeField(verbose_name=_("Creation time"), auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name=_("Update time"), auto_now=True)
+    visibility = models.CharField(verbose_name=_("Visibility"), choices=VISIBILITY.items(), default=PRIVATE, max_length=10)
 
     # Meta: used for migration purposes only
     drupal_id = models.IntegerField(null=True, blank=True, editable=False)
@@ -138,6 +156,7 @@ class Review(ReviewFormFieldsMixin, BaseStreamForm, AccessFormData, models.Model
     def get_comments_display(self, include_question=True):
         return self.render_answer(self.comment_field.id, include_question=include_question)
 
+    @property
     def get_score_display(self):
         return '{:.1f}'.format(self.score) if self.score != NA else 'NA'
 
@@ -157,11 +176,28 @@ class Review(ReviewFormFieldsMixin, BaseStreamForm, AccessFormData, models.Model
     def get_compare_url(self):
         return self.revision.get_compare_url_to_latest()
 
+    @cached_property
+    def reviewer_visibility(self):
+        return self.visibility == REVIEWER
 
-@receiver(post_save, sender=Review)
-def update_submission_reviewers_list(sender, **kwargs):
-    review = kwargs.get('instance')
+    @cached_property
+    def is_updated(self):
+        # Only compear dates, not time.
+        return self.created_at.date() < self.updated_at.date()
 
-    # Make sure the reviewer is in the reviewers list on the submission
-    if not review.submission.reviewers.filter(id=review.author.id).exists():
-        review.submission.reviewers.add(review.author)
+
+class ReviewOpinion(models.Model):
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name='opinions')
+    author = models.ForeignKey(
+        'funds.AssignedReviewers',
+        related_name='opinions',
+        on_delete=models.CASCADE,
+    )
+    opinion = models.IntegerField(choices=OPINION_CHOICES)
+
+    class Meta:
+        unique_together = ('author', 'review')
+
+    @property
+    def opinion_display(self):
+        return self.get_opinion_display()

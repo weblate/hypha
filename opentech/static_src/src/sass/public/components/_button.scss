@@ -9,6 +9,23 @@
         cursor: pointer;
     }
 
+    &:disabled,
+    &.is-disabled {
+        pointer-events: none;
+        opacity: .5;
+    }
+
+    &--primary {
+        @include button($color--light-blue, $color--dark-blue);
+        display: inline-block;
+
+        .form--filters & {
+            width: 100%;
+            text-align: center;
+            height: 45px;
+        }
+    }
+
     &--left-space {
         margin-left: 20px;
     }
@@ -22,9 +39,9 @@
         }
     }
 
-    &--transparent {
+    &--transparent,
+    &--transparent--wide {
         @include button(transparent, $color--white);
-        @include button--narrow;
 
         .header--light-bg & {
             @include button(transparent, $color--black);
@@ -40,6 +57,10 @@
                 color: $color--white;
             }
         }
+    }
+
+    &--transparent {
+        @include button--narrow;
     }
 
     // cannot conform to BEM here in order to be able to override google button styles
@@ -107,4 +128,3 @@
         }
     }
 }
-

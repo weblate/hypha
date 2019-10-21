@@ -1,0 +1,132 @@
+{% extends "application_projects/project_detail.html" %}
+
+{% load approval_tools %}
+{% load static %}
+
+{% block admin_actions %}
+<div class="modal" id="send-for-approval">
+    <h4 class="modal__header-bar">Request Approval</h4>
+
+    {% if remaining_document_categories %}
+        <h5>Are you sure you're ready to submit?</h5>
+
+        <p>This project is missing the following documents:</p>
+
+        <ul>
+            {% for missing in remaining_document_categories %}
+            <li><strong>{{ missing.category.name }} ({{ missing.difference }})</strong></li>
+            {% endfor %}
+        </ul>
+        {% include 'funds/includes/delegated_form_base.html' with form=request_approval_form value='Submit anyway' cancel=True invert=True %}
+    {% else %}
+        {% include 'funds/includes/delegated_form_base.html' with form=request_approval_form value='Request' %}
+    {% endif %}
+</div>
+
+<div class="modal" id="assign-lead">
+    <h4 class="modal__header-bar">Assign Lead</h4>
+    {% include 'funds/includes/delegated_form_base.html' with form=lead_form value='Update'%}
+</div>
+
+<div class="modal" id="approve">
+    <h4 class="modal__header-bar">Add Approval</h4>
+    <p>This will move the project into contracting and notify the compliance team.</p>
+    <p>This cannot be undone</p>
+    {% include 'funds/includes/delegated_form_base.html' with form=add_approval_form value='Approve'%}
+</div>
+
+<div class="modal" id="request-project-changes">
+    <h4 class="modal__header-bar">Request Changes</h4>
+    {% include 'funds/includes/delegated_form_base.html' with form=rejection_form value='Request Changes'%}
+</div>
+
+{% if contract_to_approve %}
+<div class="modal" id="approve-contract">
+    <h4 class="modal__header-bar">Approve Contract</h4>
+    <p>You confirm that the uploaded contract is acceptable for commencing the project.</p>
+    <p>This cannot be undone.</p>
+    {% include 'funds/includes/delegated_form_base.html' with form=approve_contract_form value='Confirm' %}
+</div>
+{% endif %}
+
+{% if object.requires_approval %}
+    <a
+        {% if not object.can_send_for_approval %}
+            onclick="return false"
+            data-tooltip="
+                {% if not object.lead %}
+                    A lead must be assigned
+                {% elif not object.user_has_updated_details %}
+                    Project approval form must be completed
+                {% elif object.is_locked %}
+                    Currently awaiting approval
+                {% endif %}"
+        {% endif %}
+        data-fancybox
+        data-src="#send-for-approval"
+        class="button button--bottom-space button--primary button--full-width {% if not object.can_send_for_approval %}button--tooltip-disabled{% endif %}"
+        href="#">
+        Submit for Approval
+    </a>
+{% endif %}
+
+{% if object.can_make_approval %}
+  {% user_can_approve_project object request.user as user_can_approve %}
+  <a data-fancybox
+      data-src="#approve"
+      class="button button--bottom-space button--primary button--full-width {% if user_can_approve %}is-not-disabled{% else %}is-disabled{% endif %}"
+      href="#">
+      Approve
+  </a>
+
+  <a data-fancybox
+      data-src="#request-project-changes"
+     class="button button--bottom-space button--primary button--full-width {% if user_can_approve %}is-not-disabled{% else %}is-disabled{% endif %}"
+      href="#">
+      Request changes
+  </a>
+{% endif %}
+
+{% endblock %}
+
+{% block admin_assignments %}
+<p class="sidebar__separator">Assign</p>
+
+<a data-fancybox
+ data-src="#assign-lead"
+ class="button button--bottom-space button--white button--full-width"
+ href="#">
+  Lead
+</a>
+
+<!-- <a data-fancybox -->
+<!-- data-src="#update-meta-terms" -->
+<!-- class="button button--bottom-space button--white button--full-width" -->
+<!-- href="#"> -->
+<!-- Meta Terms -->
+<!-- </a> -->
+{% endblock %}
+
+{% block project_approvals %}
+<div class="sidebar__inner">
+    <h5>Approved By:</h5>
+
+    {% for approval in approvals %}
+    <p>{{ approval.by }} - {{ approval.created_at|date:"Y-m-d" }}</p>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block approve_contract %}
+{% if contract_to_approve %}
+    {{ block.super }}
+    <p>
+        <a data-fancybox
+        data-src="#approve-contract"
+        class="button button--bottom-space button--primary button--full-width"
+        href="#">
+            Approve Contract
+        </a>
+    </p>
+{% endif %}
+{% endblock %}

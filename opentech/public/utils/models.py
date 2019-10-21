@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.db import models
+from django.utils.decorators import method_decorator
 
 from wagtail.admin.edit_handlers import (
     FieldPanel,
@@ -15,6 +17,8 @@ from wagtail.core.models import Orderable, Page
 from wagtail.images.edit_handlers import ImageChooserPanel
 from wagtail.snippets.models import register_snippet
 from wagtail.contrib.settings.models import BaseSetting, register_setting
+
+from wagtailcache.cache import cache_page, WagtailCacheMixin
 
 
 class LinkFields(models.Model):
@@ -80,7 +84,11 @@ class LinkFields(models.Model):
 
 # Related pages
 class RelatedPage(Orderable, models.Model):
-    page = models.ForeignKey('wagtailcore.Page', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    page = models.ForeignKey(
+        'wagtailcore.Page',
+        on_delete=models.CASCADE,
+        related_name='+',
+    )
 
     class Meta:
         abstract = True
@@ -218,7 +226,31 @@ class SocialMediaSettings(BaseSetting):
 @register_setting
 class SystemMessagesSettings(BaseSetting):
     class Meta:
-        verbose_name = 'system messages'
+        verbose_name = 'system settings'
+
+    site_logo_default = models.ForeignKey(
+        'images.CustomImage',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        help_text='Default site logo',
+    )
+
+    site_logo_mobile = models.ForeignKey(
+        'images.CustomImage',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        help_text='Mobil site logo (if not set default will be used)',
+    )
+
+    footer_content = models.TextField(
+        "Footer content",
+        default='<p>Configure this text in Wagtail admin -> Settings -> System settings.</p>',
+        help_text='This will be added to the footer, html tags is allowed.',
+    )
 
     title_404 = models.CharField(
         "Title",
@@ -232,13 +264,19 @@ class SystemMessagesSettings(BaseSetting):
 
     panels = [
         MultiFieldPanel([
+            FieldPanel('site_logo_default'),
+            FieldPanel('site_logo_mobile'),
+        ], 'Site logo'),
+        FieldPanel('footer_content'),
+        MultiFieldPanel([
             FieldPanel('title_404'),
             FieldPanel('body_404'),
         ], '404 page'),
     ]
 
 
-class BasePage(SocialFields, ListingFields, Page):
+@method_decorator(cache_page, name='serve')
+class BasePage(WagtailCacheMixin, SocialFields, ListingFields, Page):
     show_in_menus_default = True
 
     header_image = models.ForeignKey(
@@ -261,6 +299,9 @@ class BasePage(SocialFields, ListingFields, Page):
         SocialFields.promote_panels +
         ListingFields.promote_panels
     )
+
+    def cache_control(self):
+        return f'public, s-maxage={settings.CACHE_CONTROL_S_MAXAGE}'
 
 
 class BaseFunding(Orderable):

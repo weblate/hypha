@@ -1,6 +1,9 @@
+from django.urls import reverse
+from django.utils.safestring import mark_safe
 from wagtail.contrib.modeladmin.helpers import PermissionHelper
 from wagtail.contrib.modeladmin.options import ModelAdmin, ModelAdminGroup
 
+from opentech.apply.funds.models import ReviewerRole, ScreeningStatus
 from opentech.apply.review.admin import ReviewFormAdmin
 from opentech.apply.utils.admin import ListRelatedMixin
 from .admin_helpers import (
@@ -9,13 +12,12 @@ from .admin_helpers import (
     RoundFundChooserView,
 )
 from .models import ApplicationForm, FundType, LabType, RequestForPartners, Round, SealedRound
-from opentech.apply.categories.admin import CategoryAdmin
+from opentech.apply.categories.admin import CategoryAdmin, MetaTermAdmin
 
 
 class BaseRoundAdmin(ModelAdmin):
     choose_parent_view_class = RoundFundChooserView
     choose_parent_template_name = 'funds/admin/parent_chooser.html'
-    list_display = ('title', 'fund', 'start_date', 'end_date')
     button_helper_class = ButtonsWithPreview
 
     def fund(self, obj):
@@ -25,12 +27,68 @@ class BaseRoundAdmin(ModelAdmin):
 class RoundAdmin(BaseRoundAdmin):
     model = Round
     menu_icon = 'repeat'
+    list_display = ('title', 'fund', 'start_date', 'end_date', 'applications', 'review_forms')
+
+    def applications(self, obj):
+
+        def build_urls(applications):
+            for application in applications:
+                url = reverse('funds_applicationform_modeladmin_edit', args=[application.form.id])
+                yield f'<a href="{url}">{application}</a>'
+
+        urls = list(build_urls(obj.forms.all()))
+
+        if not urls:
+            return
+
+        return mark_safe('<br />'.join(urls))
+
+    def fund(self, obj):
+        url = self.url_helper.get_action_url('edit', obj.fund.id)
+        url_tag = f'<a href="{url}">{obj.fund}</a>'
+        return mark_safe(url_tag)
+
+    def review_forms(self, obj):
+        def build_urls(reviews):
+            for review in reviews:
+                url = reverse('review_reviewform_modeladmin_edit', args=[review.form.id])
+                yield f'<a href="{url}">{review}</a>'
+
+        urls = list(build_urls(obj.review_forms.all()))
+
+        if not urls:
+            return
+
+        return mark_safe('<br />'.join(urls))
+
+
+class ScreeningStatusPermissionHelper(PermissionHelper):
+    def user_can_edit_obj(self, user, obj):
+        """
+        Return a boolean to indicate whether `user` is permitted to 'change'
+        a specific `self.model` instance.
+        """
+        return user.is_superuser
+
+    def user_can_delete_obj(self, user, obj):
+        """
+        Return a boolean to indicate whether `user` is permitted to 'delete'
+        a specific `self.model` instance.
+        """
+        return user.is_superuser
+
+
+class ScreeningStatusAdmin(ModelAdmin):
+    model = ScreeningStatus
+    menu_icon = 'tag'
+    permission_helper_class = ScreeningStatusPermissionHelper
 
 
 class SealedRoundAdmin(BaseRoundAdmin):
     model = SealedRound
     menu_icon = 'locked'
     menu_label = 'Sealed Rounds'
+    list_display = ('title', 'fund', 'start_date', 'end_date')
 
 
 class FundAdmin(ModelAdmin):
@@ -49,6 +107,12 @@ class LabAdmin(ModelAdmin):
     model = LabType
     menu_icon = 'doc-empty'
     menu_label = 'Labs'
+
+
+class ReviewerRoleAdmin(ModelAdmin):
+    model = ReviewerRole
+    menu_icon = 'group'
+    menu_label = 'Reviewer Roles'
 
 
 class NoDeletePermission(PermissionHelper):
@@ -82,4 +146,7 @@ class ApplyAdminGroup(ModelAdminGroup):
         ApplicationFormAdmin,
         ReviewFormAdmin,
         CategoryAdmin,
+        ScreeningStatusAdmin,
+        ReviewerRoleAdmin,
+        MetaTermAdmin,
     )

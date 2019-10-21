@@ -4,12 +4,7 @@ Django settings for opentech project.
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 import os
-import sys
-
 import dj_database_url
-import raven
-from raven.exceptions import InvalidGitRepository
-
 
 env = os.environ.copy()
 
@@ -26,6 +21,14 @@ if 'SECRET_KEY' in env:
 
 if 'ALLOWED_HOSTS' in env:
     ALLOWED_HOSTS = env['ALLOWED_HOSTS'].split(',')
+
+
+# Organisation name and e-mail address, used in e-mail templates etc.
+
+ORG_LONG_NAME = env.get('ORG_LONG_NAME', 'Acme Corporation')
+ORG_SHORT_NAME = env.get('ORG_SHORT_NAME', 'ACME')
+ORG_EMAIL = env.get('ORG_EMAIL', 'info@example.org')
+ORG_GUIDE_URL = env.get('ORG_GUIDE_URL', 'https://guide.example.org/')
 
 
 # Email settings
@@ -73,6 +76,8 @@ INSTALLED_APPS = [
     'opentech.apply.review',
     'opentech.apply.determinations',
     'opentech.apply.stream_forms',
+    'opentech.apply.utils',
+    'opentech.apply.projects.apps.ProjectsConfig',
 
     'opentech.public.funds',
     'opentech.public.home',
@@ -83,6 +88,7 @@ INSTALLED_APPS = [
     'opentech.public.projects',
     'opentech.public.search',
     'opentech.public.standardpages',
+    'opentech.public.forms',
     'opentech.public.utils',
 
     'social_django',
@@ -114,9 +120,19 @@ INSTALLED_APPS = [
     'addressfield',
     'django_bleach',
     'django_fsm',
+    'django_pwned_passwords',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
+    'django_otp.plugins.otp_static',
+    'two_factor',
+    'rest_framework',
+    'rest_framework_api_key',
+    'wagtailcache',
 
     'hijack',
     'compat',
+    'pagedown',
+    'webpack_loader',
 
     'django.contrib.admin',
     'django.contrib.auth',
@@ -140,6 +156,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django_referrer_policy.middleware.ReferrerPolicyMiddleware',
+    'django_otp.middleware.OTPMiddleware',
 
     'opentech.apply.users.middleware.SocialAuthExceptionMiddleware',
 
@@ -169,6 +186,7 @@ TEMPLATES = [
                 'opentech.public.utils.context_processors.global_vars',
                 'social_django.context_processors.backends',
                 'social_django.context_processors.login_redirect',
+                'opentech.apply.projects.context_processors.projects_enabled',
             ],
         },
     },
@@ -191,11 +209,36 @@ DATABASES = {
 
 
 # Cache
+
+# Set max-age header.
+try:
+    CACHE_CONTROL_MAX_AGE = int(env.get('CACHE_CONTROL_MAX_AGE', 3600))
+except ValueError:
+    CACHE_CONTROL_MAX_AGE = 3600
+
+# Set s-max-age header that is used by reverse proxy/front end cache.
+try:
+    CACHE_CONTROL_S_MAXAGE = int(env.get('CACHE_CONTROL_S_MAXAGE', 3600))
+except ValueError:
+    CACHE_CONTROL_S_MAXAGE = 3600
+
+# Set wagtail cache timeout (automatic cache refresh).
+WAGTAIL_CACHE_TIMEOUT = CACHE_CONTROL_MAX_AGE
+
+# Set feed cache timeout (automatic cache refresh).
+FEED_CACHE_TIMEOUT = 600
+
 if 'REDIS_URL' in env:
     CACHES = {
         "default": {
             "BACKEND": "django_redis.cache.RedisCache",
             "LOCATION": env['REDIS_URL'],
+        },
+        "wagtailcache": {
+            "BACKEND": "wagtailcache.compat_backends.django_redis.RedisCache",
+            "LOCATION": env['REDIS_URL'],
+            'KEY_PREFIX': 'wagtailcache',
+            'TIMEOUT': WAGTAIL_CACHE_TIMEOUT,
         }
     }
 else:
@@ -203,16 +246,28 @@ else:
         'default': {
             'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
             'LOCATION': 'database_cache',
+        },
+        'wagtailcache': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'database_cache',
+            'KEY_PREFIX': 'wagtailcache',
+            'TIMEOUT': WAGTAIL_CACHE_TIMEOUT,
         }
     }
 
+WAGTAIL_CACHE_BACKEND = 'wagtailcache'
 
-# Set s-max-age header that is used by reverse proxy/front end cache. See
-# urls.py
-try:
-    CACHE_CONTROL_S_MAXAGE = int(env.get('CACHE_CONTROL_S_MAXAGE', 600))
-except ValueError:
-    pass
+# Cloudflare cache
+if 'CLOUDFLARE_API_TOKEN' in env:
+    INSTALLED_APPS += ('wagtail.contrib.frontend_cache', )  # noqa
+    WAGTAILFRONTENDCACHE = {
+        'cloudflare': {
+            'BACKEND': 'wagtail.contrib.frontend_cache.backends.CloudflareBackend',
+            'EMAIL': env['CLOUDFLARE_API_EMAIL'],
+            'TOKEN': env['CLOUDFLARE_API_TOKEN'],
+            'ZONEID': env['CLOUDFLARE_API_ZONEID'],
+        },
+    }
 
 
 # Search
@@ -229,19 +284,21 @@ WAGTAILSEARCH_BACKENDS = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 12,
+        }
+    },
+    {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        'NAME': 'django_pwned_passwords.password_validation.PWNEDPasswordValidator',
     },
 ]
 
+# Number of days that password reset and account activation links are valid (default 3).
+PASSWORD_RESET_TIMEOUT_DAYS = 8
 
 # Internationalization
 # https://docs.djangoproject.com/en/stable/topics/i18n/
@@ -307,11 +364,6 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        # Send logs with level of at least ERROR to Sentry.
-        'sentry': {
-            'level': 'ERROR',
-            'class': 'raven.contrib.django.raven_compat.handlers.SentryHandler',
-        },
     },
     'formatters': {
         'verbose': {
@@ -320,22 +372,27 @@ LOGGING = {
     },
     'loggers': {
         'opentech': {
-            'handlers': ['console', 'sentry'],
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
         'wagtail': {
-            'handlers': ['console', 'sentry'],
+            'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
+        'django': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
         'django.request': {
-            'handlers': ['console', 'sentry'],
+            'handlers': ['console'],
             'level': 'WARNING',
             'propagate': False,
         },
         'django.security': {
-            'handlers': ['console', 'sentry'],
+            'handlers': ['console'],
             'level': 'WARNING',
             'propagate': False,
         },
@@ -353,15 +410,14 @@ WAGTAILIMAGES_FEATURE_DETECTION_ENABLED = False
 WAGTAILADMIN_RICH_TEXT_EDITORS = {
     'default': {
         'WIDGET': 'wagtail.admin.rich_text.DraftailRichTextArea',
-        # fixed in wagtail 2.0.1: https://github.com/wagtail/wagtail/commit/09f8a4f38a95f2760f38ab2f142443df93b5d8c6
-        # 'OPTIONS': {
-        #     'features': [
-        #         'bold', 'italic',
-        #         'h3', 'h4', 'h5',
-        #         'ol', 'ul',
-        #         'link'
-        #     ]
-        # }
+        'OPTIONS': {
+            'features': [
+                'bold', 'italic',
+                'h2', 'h3', 'h4', 'h5',
+                'ol', 'ul',
+                'link'
+            ]
+        }
     },
 }
 
@@ -377,14 +433,24 @@ ESI_ENABLED = False
 ENABLE_STYLEGUIDE = False
 DEBUGTOOLBAR = False
 
+# Staff e-mail domain
+
+if 'STAFF_EMAIL_DOMAINS' in env:
+    STAFF_EMAIL_DOMAINS = env['STAFF_EMAIL_DOMAINS'].split(',')
+else:
+    STAFF_EMAIL_DOMAINS = ['opentech.fund']
+
 # Social Auth
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
 
 # Set the Google OAuth2 credentials in ENV variables or local.py
 # To create a new set of credentials, go to https://console.developers.google.com/apis/credentials
 # Make sure the Google+ API is enabled for your API project
-STAFF_EMAIL_DOMAINS = ['opentech.fund']
-SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS = env.get('SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS', '').split(',') or STAFF_EMAIL_DOMAINS
+if 'SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS' in env:
+    SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS = env['SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS'].split(',')
+else:
+    SOCIAL_AUTH_GOOGLE_OAUTH2_WHITELISTED_DOMAINS = STAFF_EMAIL_DOMAINS
+
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = env.get('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', '')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = env.get('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET', '')
 
@@ -407,15 +473,21 @@ SOCIAL_AUTH_PIPELINE = (
 )
 
 # Bleach Settings
-BLEACH_ALLOWED_TAGS = ['h2', 'h3', 'p', 'b', 'i', 'em', 'strong', 'a', 'ul', 'ol', 'li', 'br']
+BLEACH_ALLOWED_TAGS = ['a', 'b', 'big', 'blockquote', 'br', 'cite', 'code', 'col', 'colgroup', 'dd', 'del', 'dl', 'dt', 'em', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'ins', 'li', 'ol', 'p', 'pre', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul']
 
-BLEACH_ALLOWED_ATTRIBUTES = ['href', 'title', 'style']
+BLEACH_ALLOWED_ATTRIBUTES = ['class', 'colspan', 'href', 'rowspan', 'title', 'width']
 
-BLEACH_ALLOWED_STYLES = ['font-family', 'font-weight', 'text-decoration', 'font-variant']
+BLEACH_ALLOWED_STYLES = []
 
 BLEACH_STRIP_TAGS = True
 
 BLEACH_STRIP_COMMENTS = True
+
+# File Field settings
+FILE_ALLOWED_EXTENSIONS = ['doc', 'docx', 'odp', 'ods', 'odt', 'pdf', 'ppt', 'pptx', 'rtf', 'txt', 'xls', 'xlsx']
+
+# Accept attribute in input tag of type file needs filename extensions, starting with a period (".") character.
+FILE_ACCEPT_ATTR_VALUE = ", ".join(['.' + ext for ext in FILE_ALLOWED_EXTENSIONS])
 
 # Hijack Settings
 HIJACK_LOGIN_REDIRECT_URL = '/dashboard/'
@@ -425,6 +497,11 @@ HIJACK_DECORATOR = 'opentech.apply.users.decorators.superuser_decorator'
 
 # Messaging Settings
 SEND_MESSAGES = env.get('SEND_MESSAGES', 'false').lower() == 'true'
+
+if not SEND_MESSAGES:
+    from django.contrib.messages import constants as message_constants
+    MESSAGE_LEVEL = message_constants.DEBUG
+
 SLACK_DESTINATION_URL = env.get('SLACK_DESTINATION_URL', None)
 SLACK_DESTINATION_ROOM = env.get('SLACK_DESTINATION_ROOM', None)
 
@@ -481,44 +558,6 @@ MAILCHIMP_API_KEY = env.get('MAILCHIMP_API_KEY')
 MAILCHIMP_LIST_ID = env.get('MAILCHIMP_LIST_ID')
 
 
-# Raven (sentry) configuration.
-if 'SENTRY_DSN' in env:
-    INSTALLED_APPS += (
-        'raven.contrib.django.raven_compat',
-    )
-
-    RAVEN_CONFIG = {
-        'dsn': env['SENTRY_DSN'],
-        'tags': {},
-    }
-
-    # Specifying the programming language as a tag can be useful when
-    # e.g. javascript error logging is enabled within the same project,
-    # so that errors can be filtered by the programming language too.
-    # The 'lang' tag is just an arbitrarily chosen one; any other tags can be used as well.
-    # It has to overriden in javascript: Raven.setTagsContext({lang: 'javascript'});
-    RAVEN_CONFIG['tags']['lang'] = 'python'
-
-    # Prevent logging errors from the django shell.
-    # Errors from other managenent commands will be still logged.
-    if len(sys.argv) > 1 and sys.argv[1] in ['shell', 'shell_plus']:
-        RAVEN_CONFIG['ignore_exceptions'] = ['*']
-
-    # There's a chooser to toggle between environments at the top right corner on sentry.io
-    # Values are typically 'staging' or 'production' but can be set to anything else if needed.
-    # heroku config:set SENTRY_ENVIRONMENT=production
-    if 'SENTRY_ENVIRONMENT' in env:
-        RAVEN_CONFIG['environment'] = env['SENTRY_ENVIRONMENT']
-
-    try:
-        RAVEN_CONFIG['release'] = raven.fetch_git_sha(BASE_DIR)
-    except InvalidGitRepository:
-        try:
-            RAVEN_CONFIG['release'] = env['GIT_REV']
-        except KeyError:
-            pass
-
-
 # Basic auth settings
 if env.get('BASIC_AUTH_ENABLED', 'false').lower().strip() == 'true':
     MIDDLEWARE.insert(0, 'baipw.middleware.BasicAuthIPWhitelistMiddleware')
@@ -532,19 +571,6 @@ if env.get('BASIC_AUTH_ENABLED', 'false').lower().strip() == 'true':
         BASIC_AUTH_WHITELISTED_IP_NETWORKS = (
             env['BASIC_AUTH_WHITELISTED_IP_NETWORKS'].split(',')
         )
-
-
-# Cloudflare cache
-if 'CLOUDFLARE_API_TOKEN' in env:
-    INSTALLED_APPS += ('wagtail.contrib.frontend_cache', )  # noqa
-    WAGTAILFRONTENDCACHE = {
-        'cloudflare': {
-            'BACKEND': 'wagtail.contrib.frontend_cache.backends.CloudflareBackend',
-            'EMAIL': env['CLOUDFLARE_API_EMAIL'],
-            'TOKEN': env['CLOUDFLARE_API_TOKEN'],
-            'ZONEID': env['CLOUDFLARE_API_ZONEID'],
-        },
-    }
 
 
 if 'PRIMARY_HOST' in env:
@@ -573,9 +599,47 @@ if env.get('SECURE_BROWSER_XSS_FILTER', 'true').lower().strip() == 'true':
 if env.get('SECURE_CONTENT_TYPE_NOSNIFF', 'true').lower().strip() == 'true':
     SECURE_CONTENT_TYPE_NOSNIFF = True
 
+if env.get('COOKIE_SECURE', 'false').lower().strip() == 'true':
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 
 # Referrer-policy header settings
 # https://django-referrer-policy.readthedocs.io/en/1.0/
 
 REFERRER_POLICY = env.get('SECURE_REFERRER_POLICY',
                           'no-referrer-when-downgrade').strip()
+
+WEBPACK_LOADER = {
+    'DEFAULT': {
+        'BUNDLE_DIR_NAME': 'app/',
+        'STATS_FILE': os.path.join(BASE_DIR, './opentech/static_compiled/app/webpack-stats-prod.json'),
+    }
+}
+
+# Django countries package provides ISO 3166-1 countries which does not contain Kosovo.
+COUNTRIES_OVERRIDE = {
+    'KV': 'Kosovo',
+}
+
+# Rest Framework configuration
+REST_FRAMEWORK = {
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework.authentication.SessionAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    )
+}
+
+
+# Projects Feature Flag
+PROJECTS_ENABLED = False
+if env.get('PROJECTS_ENABLED', 'false').lower().strip() == 'true':
+    PROJECTS_ENABLED = True
+
+PROJECTS_AUTO_CREATE = False
+if env.get('PROJECTS_AUTO_CREATE', 'false').lower().strip() == 'true':
+    PROJECTS_AUTO_CREATE = True
