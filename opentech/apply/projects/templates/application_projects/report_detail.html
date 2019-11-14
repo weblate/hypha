@@ -34,18 +34,11 @@
                     <div class="rich-text">
                         {{ object.current.private_content|bleach|safe }}
                     </div>
-                    {% for file in object.current.files.all %}
-                        {% if forloop.first %}
-                            <h4>Attachements</h4>
-                            <ul>
-                        {% endif %}
 
-                        <li><a href="{{ file.get_absolute_url }}">{{ file.filename }}</a></li>
-
-                        {% if forloop.last %}
-                            </ul>
-                        {% endif %}
-                    {% endfor %}
+                    {% if object.current.files.all %}
+                        <h4>Attachments</h4>
+                    {% endif %}
+                    {% include "includes/file_list.html" with files=object.current.files.all %}
                 {% endif %}
             </div>
         </div>

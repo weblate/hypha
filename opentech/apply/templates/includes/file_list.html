@@ -1,0 +1,22 @@
+{% for file in files %}
+    {% if forloop.first %}
+        <ul class="filelist">
+        {% endif %}
+
+            <li><a class="filelist__file" href="{{ file.get_absolute_url }}">
+                <span class="filelist__icon">
+                    <svg><use xlink:href="#attachment"></use></svg>
+                </span>
+                <span class="filelist__content">
+                    <span class="filelist__text">
+                        {{ file }}
+                        <span class="filelist__size">{{ file.document.size|filesizeformat }}</span>
+                    </span>
+                    <span class="filelist__link">Download</span>
+                </span>
+            </a></li>
+
+    {% if forloop.last %}
+        </ul>
+    {% endif %}
+{% endfor %}
