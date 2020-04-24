@@ -5,6 +5,7 @@ from django.utils.translation import ugettext_lazy as _
 from wagtail.core import blocks
 
 from addressfield.fields import ADDRESS_FIELDS_ORDER, AddressField
+from collaboratorsfield.fields import CollaboratorsField
 from hypha.apply.categories.blocks import CategoryQuestionBlock
 from hypha.apply.stream_forms.blocks import FormFieldsBlock
 from hypha.apply.utils.blocks import (
@@ -52,6 +53,13 @@ class EmailBlock(ApplicationMustIncludeFieldBlock):
 
     class Meta:
         icon = 'mail'
+
+
+class CollaboratorsBlock(ApplicationSingleIncludeFieldBlock):
+    name = 'collaborators'
+    description = 'The email for folks collaborating on this project'
+    
+    field_class = CollaboratorsField
 
 
 class AddressFieldBlock(ApplicationSingleIncludeFieldBlock):
