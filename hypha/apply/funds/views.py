@@ -1,8 +1,10 @@
 from copy import copy
+from statistics import mean
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.mixins import UserPassesTestMixin
+from django.contrib.humanize.templatetags.humanize import intcomma
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, F, Q
 from django.http import FileResponse, Http404, HttpResponseRedirect
@@ -337,12 +339,15 @@ class SubmissionStaffFlaggedView(BaseAdminSubmissionsTable):
         return self.filterset_class._meta.model.objects.current().for_table(self.request.user).flagged_staff().order_by('-submit_time')
 
 
-@method_decorator(staff_required, name='dispatch')
-class SubmissionUserFlaggedView(BaseAdminSubmissionsTable):
+@method_decorator(login_required, name='dispatch')
+class SubmissionUserFlaggedView(UserPassesTestMixin, BaseAdminSubmissionsTable):
     template_name = 'funds/submissions_user_flagged.html'
 
     def get_queryset(self):
         return self.filterset_class._meta.model.objects.current().for_table(self.request.user).flagged_by(self.request.user).order_by('-submit_time')
+
+    def test_func(self):
+        return self.request.user.is_apply_staff or self.request.user.is_reviewer
 
 
 @method_decorator(staff_required, name='dispatch')
@@ -516,7 +521,9 @@ class UpdateReviewersView(DelegatedViewMixin, UpdateView):
             removed=removed,
         )
 
-        if added:
+        # Check if two internal reviewers have been selected.
+        internal_reviewers_count = form.instance.assigned.with_roles().count()
+        if internal_reviewers_count > 1:
             # Automatic workflow actions.
             action = None
             if self.object.status == INITIAL_STATE:
@@ -1084,3 +1091,59 @@ class SubmissionDetailPDFView(SingleObjectMixin, View):
             as_attachment=True,
             filename=self.object.title + '.pdf',
         )
+
+
+@method_decorator(staff_required, name='dispatch')
+class SubmissionResultView(FilterView):
+    template_name = 'funds/submissions_result.html'
+    filterset_class = SubmissionFilterAndSearch
+    filter_action = ''
+
+    excluded_fields = []
+
+    @property
+    def excluded(self):
+        return {
+            'exclude': self.excluded_fields
+        }
+
+    def get_filterset_kwargs(self, filterset_class, **kwargs):
+        new_kwargs = super().get_filterset_kwargs(filterset_class)
+        new_kwargs.update(self.excluded)
+        new_kwargs.update(kwargs)
+        return new_kwargs
+
+    def get_queryset(self):
+        return self.filterset_class._meta.model.objects.current()
+
+    def get_context_data(self, **kwargs):
+        search_term = self.request.GET.get('query')
+        total_value = '____'
+        average_value = '____'
+        if self.request.GET:
+            submission_values = self.get_submission_values()
+            total_value = intcomma(submission_values.get('total'))
+            average_value = intcomma(submission_values.get('average'))
+
+        return super().get_context_data(
+            search_term=search_term,
+            filter_action=self.filter_action,
+            total_value=total_value,
+            average_value=average_value,
+            **kwargs,
+        )
+
+    def get_submission_values(self):
+        values = []
+        for submission in self.object_list:
+            try:
+                value = int(submission.data('value'))
+            except (TypeError, ValueError):
+                value = 0
+            else:
+                if not value or value < 0:
+                    value = 0
+            finally:
+                values.append(value)
+
+        return {'total': sum(values), 'average': round(mean(values))}
