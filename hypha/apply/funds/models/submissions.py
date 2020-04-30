@@ -416,6 +416,11 @@ class ApplicationSubmission(
         related_query_name='submission',
     )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    collaborators = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='submissions_collaborators',
+        blank=False,
+    )
     search_data = models.TextField()
 
     # Workflow inherited from WorkflowHelpers

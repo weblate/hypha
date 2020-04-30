@@ -846,7 +846,7 @@ class AdminSubmissionEditView(BaseSubmissionEditView):
 class ApplicantSubmissionEditView(BaseSubmissionEditView):
     def dispatch(self, request, *args, **kwargs):
         submission = self.get_object()
-        if request.user != submission.user:
+        if request.user != submission.user or request.user != submission.collaborators.filter(pk=request.user.pk).exists():
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
