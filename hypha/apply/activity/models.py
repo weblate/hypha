@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-from django.db import models
+Ffrom django.db import models
 from django.db.models import Case, Value, When
 from django.db.models.functions import Concat
 
@@ -22,10 +22,10 @@ PARTNER = 'partners'
 ALL = 'all'
 
 VISIBILILTY_HELP_TEXT = {
-    APPLICANT: 'Visible to applicant and team.',
+    APPLICANT: 'Visible to applicant and OTF team.',
     TEAM: 'Visible only to team.',
-    REVIEWER: 'Visible to reviewers and team.',
-    PARTNER: 'Visible to partners and team.',
+    REVIEWER: 'Visible to reviewers and OTF team.',
+    PARTNER: 'Visible to partners and OTF team.',
     ALL: 'Visible to any user who has access to the submission.',
 }
 
@@ -41,7 +41,15 @@ VISIBILITY = {
 
 class BaseActivityQuerySet(models.QuerySet):
     def visible_to(self, user):
-        return self.filter(visibility__in=self.model.visibility_for(user))
+        if user.is_applicant:
+            return self.filter(visible_to_applicants=True)
+        if user.is_reviewer:
+            return self.filter(visible_to_reviewers=True)
+        if user.is_partner:
+            return self.filter(visibile_to_partners=True)
+        if user.is_apply_staff:
+            return self
+        # return self.filter(visibility__in=self.model.visibility_for(user))
 
     def newer(self, activity):
         return self.filter(timestamp__gt=activity.timestamp)
@@ -95,6 +103,10 @@ class Activity(models.Model):
     message = models.TextField()
     visibility = models.CharField(choices=list(VISIBILITY.items()), default=APPLICANT, max_length=30)
 
+    visible_to_applicants = models.BooleanField(default=True)
+    visible_to_reviewers = models.BooleanField(default=False)
+    visible_to_partners = models.BooleanField(default=False)
+
     # Fields for handling versioning of the comment activity models
     edited = models.DateTimeField(default=None, null=True)
     current = models.BooleanField(default=True)
@@ -116,26 +128,20 @@ class Activity(models.Model):
     @property
     def priviledged(self):
         # Not visible to applicant
-        return self.visibility not in [APPLICANT, ALL]
+        # return self.visibility not in [APPLICANT, ALL]
+        return not self.visible_to_applicants
 
     @property
     def private(self):
-        # not visible to all
-        return self.visibility not in [ALL]
+        # only visible to OTF team
+        return not self.visible_to_partners and not self.visible_to_applicants and not self.visible_to_reviewers
 
     def __str__(self):
         return '{}: for "{}"'.format(self.get_type_display(), self.source)
 
     @classmethod
     def visibility_for(cls, user):
-        if user.is_apply_staff:
-            return [APPLICANT, TEAM, REVIEWER, PARTNER, ALL]
-        if user.is_reviewer:
-            return [REVIEWER, ALL]
-        if user.is_partner:
-            return [PARTNER, ALL]
-
-        return [APPLICANT, ALL]
+        return [APPLICANT, REVIEWER, PARTNER]
 
     @classmethod
     def visibility_choices_for(cls, user):
