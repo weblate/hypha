@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-Ffrom django.db import models
+from django.db import models
 from django.db.models import Case, Value, When
 from django.db.models.functions import Concat
 
