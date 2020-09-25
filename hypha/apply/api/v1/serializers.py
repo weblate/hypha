@@ -113,10 +113,11 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     url = serializers.HyperlinkedIdentityField(view_name='api:v1:submissions-detail')
     round = serializers.SerializerMethodField()
     last_update = TimestampField()
+    screening = serializers.CharField(source='screening_status')
 
     class Meta:
         model = ApplicationSubmission
-        fields = ('id', 'title', 'status', 'url', 'round', 'last_update')
+        fields = ('id', 'title', 'status', 'url', 'round', 'last_update', 'screening')
 
     def get_round(self, obj):
         """
