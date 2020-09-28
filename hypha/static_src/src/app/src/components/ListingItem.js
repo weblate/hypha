@@ -16,6 +16,7 @@ export default class ListingItem extends React.Component {
 }
 
 ListingItem.propTypes = {
+    id: PropTypes.string,
     item: PropTypes.shape({
         title: PropTypes.string,
     }),

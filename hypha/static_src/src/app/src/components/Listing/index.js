@@ -11,7 +11,7 @@ import './style.scss';
 
 export default class Listing extends React.Component {
     static propTypes = {
-        items: PropTypes.array.isRequired,
+        items: PropTypes.shape({statuses : PropTypes.array.isRequired, screening: PropTypes.array}),
         isLoading: PropTypes.bool,
         isErrored: PropTypes.bool,
         errorMessage: PropTypes.string,
@@ -34,7 +34,9 @@ export default class Listing extends React.Component {
         return (
             <>
                 { isErrored && this.renderErrorItem() }
-                {items.map(v => renderItem(v))}
+                {items.statuses.map(v => renderItem(v))}
+                {items.screening.map(v => renderItem(v, true))}
+
             </>
         );
     }
@@ -90,7 +92,7 @@ export default class Listing extends React.Component {
             listRef,
         } = this.props;
 
-        if ( items.length === 0 ) {
+        if ( items.statuses.length === 0 ) {
             if (isLoading) {
                 return (
                     <LoadingPanel />

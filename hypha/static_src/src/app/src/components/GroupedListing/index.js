@@ -32,7 +32,11 @@ export default class GroupedListing extends React.Component {
     }
 
     state = {
-        orderedItems: [],
+        orderedItems: {
+            statuses: [],
+            screening: []
+        },
+        //orderedItems: [],
     };
 
     constructor(props) {
@@ -58,7 +62,7 @@ export default class GroupedListing extends React.Component {
 
             // If we dont have an active item, then get one
             if ( !newItem ) {
-                const firstGroup = this.state.orderedItems[0]
+                const firstGroup = this.state.orderedItems.statuses[0]
                 if ( firstGroup && firstGroup.items[0] ) {
                     this.setState({firstUpdate: false})
                     this.props.onItemSelection(firstGroup.items[0].id)
@@ -69,7 +73,6 @@ export default class GroupedListing extends React.Component {
 
     getGroupedItems() {
         const { groupBy, items } = this.props;
-
         return items.reduce((tmpItems, v) => {
             const groupByValue = v[groupBy];
             if (!(groupByValue in tmpItems)) {
@@ -80,34 +83,57 @@ export default class GroupedListing extends React.Component {
         }, {});
     }
 
+    getScreeningList(){
+        const { items } = this.props;
+        return items.reduce((tmpItems, v)=> {
+            const groupByValue = v["screening"]
+            if(groupByValue){
+                if (!(groupByValue in tmpItems)) {
+                    tmpItems[groupByValue] = [];
+                }
+                tmpItems[groupByValue].push({...v});
+            }
+        return tmpItems;
+
+        },{})
+    }
+
     orderItems() {
         const groupedItems = this.getGroupedItems();
+        const screeningList = this.getScreeningList();
         const { order = [] } = this.props;
-        const orderedItems = order.map(({key, display, values}) => ({
+        const statusOrderedItems = order.map(({key, display, values}) => ({
             name: display,
             key,
             items: values.reduce((acc, value) => acc.concat(groupedItems[value] || []), [])
         })).filter(({items}) => items.length !== 0)
 
-        orderedItems.map(value => {
+        statusOrderedItems.map(value => {
             value.items.sort((a,b) => a.lastUpdate > b.lastUpdate ? -1 : 1)
         })
 
-        this.setState({orderedItems});
+        const screeningOrderedList = []
+        for (const screening in screeningList){
+            screeningOrderedList.push({name: screening, key: screening, items: screeningList[screening]})
+        }
+        this.setState({orderedItems : {"statuses" : statusOrderedItems, "screening" : screeningOrderedList}});
     }
 
-    renderItem = group => {
+    renderItem = (group, isScreening= false) => {
         const { activeItem, onItemSelection } = this.props;
         return (
-            <ListingGroup key={`listing-group-${group.key}`} id={group.key} item={group}>
+            <div className={isScreening ? "screening-filter" : "status-filter"}>
+            <ListingGroup key={`listing-group-${group.key}`} id={group.key} item={group} >
                 {group.items.map(item => {
                     return <ListingItem
                         selected={!!activeItem && activeItem===item.id}
                         onClick={() => onItemSelection(item.id)}
                         key={`listing-item-${item.id}`}
-                        item={item}/>;
+                        item={item}
+                        />;
                 })}
             </ListingGroup>
+            </div>
         );
     }
 
@@ -126,7 +152,6 @@ export default class GroupedListing extends React.Component {
         if (this.listRef.current) {
             document.documentElement.style.setProperty('--last-listing-item-height', this.listRef.current.lastElementChild.offsetHeight + 'px');
         }
-
         return  (
             <div className="grouped-listing">
                 <div className="grouped-listing__dropdown" ref={(ref) => this.dropdownContainer = ref}>
