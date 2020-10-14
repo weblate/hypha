@@ -18,8 +18,8 @@ const TinyMCE = props => {
         ...(props.mce_attrs),
         menubar: false
       }}
-      onChange={e => props.onChange(props.name, e.level.content)}
       id={props.name}
+      onEditorChange = {content => props.onChange(props.name, content)}
     />
   </div>
 }
