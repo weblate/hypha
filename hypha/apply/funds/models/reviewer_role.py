@@ -78,13 +78,14 @@ class ReviewerSettings(BaseSetting):
     )
     use_settings = models.BooleanField(
         default=False,
+        verbose_name='Activate these settings',
         help_text='Use the above configured variables to filter out submissions'
     )
 
     panels = [
+        FieldPanel('use_settings'),
         FieldPanel('submission'),
         FieldPanel('state'),
         FieldPanel('outcome'),
         FieldPanel('assigned'),
-        FieldPanel('use_settings'),
     ]

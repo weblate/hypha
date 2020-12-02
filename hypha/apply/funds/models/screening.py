@@ -6,12 +6,12 @@ from ..admin_forms import ScreeningStatusAdminForm
 class ScreeningStatus(models.Model):
     title = models.CharField(max_length=128)
     yes = models.BooleanField(
-        default=False, verbose_name="Yes/No",
-        help_text='Tick mark for Yes otherwise No.'
+        default=False, verbose_name="Accept/Dismissed",
+        help_text='Check for Accept, uncheck for Dismissed.'
     )
     default = models.BooleanField(
-        default=False, verbose_name="Default Yes/No",
-        help_text='Only one Yes and No screening status can be set as default.'
+        default=False, verbose_name="Default",
+        help_text='Only one Accept and one Dismissed screening status can be set as default.'
     )
 
     base_form_class = ScreeningStatusAdminForm
