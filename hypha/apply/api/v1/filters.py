@@ -8,9 +8,10 @@ from hypha.apply.funds.models import (
     FundType,
     LabType,
     RoundsAndLabs,
+    ScreeningStatus
 )
 from hypha.apply.funds.workflow import PHASES
-
+from django.contrib.auth import get_user_model
 
 class RoundLabFilter(filters.ModelChoiceFilter):
     def filter(self, qs, value):
@@ -18,7 +19,6 @@ class RoundLabFilter(filters.ModelChoiceFilter):
             return qs
 
         return qs.filter(Q(round=value) | Q(page=value))
-
 
 class SubmissionsFilter(filters.FilterSet):
     round = RoundLabFilter(queryset=RoundsAndLabs.objects.all())
@@ -29,10 +29,22 @@ class SubmissionsFilter(filters.FilterSet):
         field_name='page', label='fund',
         queryset=Page.objects.type(FundType) | Page.objects.type(LabType)
     )
+    screening_statuses = filters.ModelMultipleChoiceFilter(
+        field_name='screening_statuses',
+        queryset=ScreeningStatus.objects.all(),
+    )
+    reviewers = filters.ModelMultipleChoiceFilter(
+        field_name='reviewers',
+        queryset=get_user_model().objects.all(),
+    )
+    lead = filters.ModelMultipleChoiceFilter(
+        field_name='lead',
+        queryset=get_user_model().objects.all(),
+    )
 
     class Meta:
         model = ApplicationSubmission
-        fields = ('status', 'round', 'active', 'submit_date', 'fund', )
+        fields = ('status', 'round', 'active', 'submit_date', 'fund', 'screening_statuses', 'reviewers', 'lead')
 
     def filter_active(self, qs, name, value):
         if value is None:
@@ -42,7 +54,6 @@ class SubmissionsFilter(filters.FilterSet):
             return qs.active()
         else:
             return qs.inactive()
-
 
 class NewerThanFilter(filters.ModelChoiceFilter):
     def filter(self, qs, value):
