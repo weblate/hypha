@@ -25,7 +25,12 @@ class RoundLabFilter(filters.ModelChoiceFilter):
 
 
 class SubmissionsFilter(filters.FilterSet):
-    round = RoundLabFilter(queryset=RoundsAndLabs.objects.all())
+    # round = RoundLabFilter(queryset=RoundsAndLabs.objects.all())
+    round = filters.ModelMultipleChoiceFilter(
+        field_name='round',
+        queryset=RoundsAndLabs.objects.all(),
+        method='filter_round'
+    )
     status = filters.MultipleChoiceFilter(choices=PHASES)
     active = filters.BooleanFilter(method='filter_active', label='Active')
     submit_date = filters.DateFromToRangeFilter(field_name='submit_time', label='Submit date')
@@ -59,6 +64,7 @@ class SubmissionsFilter(filters.FilterSet):
     class Meta:
         model = ApplicationSubmission
         fields = ('id', 'status', 'round', 'active', 'submit_date', 'fund', 'screening_statuses', 'reviewers', 'lead')
+
 
     def __init__(self, *args, exclude=list(), limit_statuses=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -110,6 +116,13 @@ class SubmissionsFilter(filters.FilterSet):
         if not value:
             return qs
         return qs.filter(id__in=map(lambda x: x.id, value))
+
+
+    def filter_round(self, qs, name, value):
+        if not value:
+            return qs
+
+        return qs.filter(Q(round__in=map(lambda x: x.id, value)) | Q(page__in=map(lambda x: x.id, value)))
 
 
 class NewerThanFilter(filters.ModelChoiceFilter):
